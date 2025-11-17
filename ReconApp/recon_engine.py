@@ -76,142 +76,11 @@ def load_internal_plc():
 mapping_accounts_df, mapping_dir_df = load_internal_mapping()
 plc_df = load_internal_plc()
 
-# ------------------------------------------------------
-# BUTTON
-# ------------------------------------------------------
+# ------------
+# Workbook function
+# -----------
 
-generate = st.button("Generate Recon File", type="primary")
-
-if generate:
-    if trial_balance_upload is None or entries_upload is None or ICP == "":
-        st.error("Please upload both files and input ICP Code.")
-        st.stop()
-
-    with st.spinner("Generating Recon File… please wait, this may take up to 20 seconds…"):
-
-        # LOAD USER FILES
-        trial_balance_df = pd.read_excel(trial_balance_upload)
-        entries_df = pd.read_excel(entries_upload)
-
-        # The next section calls your full original logic…
-        # The function is defined in MESSAGE 2
-        try:
-            output_bytes = build_recon_workbook(
-                trial_balance_df,
-                entries_df,
-                mapping_accounts_df,
-                mapping_dir_df,
-                plc_df,
-                ICP
-            )
-        except Exception as e:
-            st.error(f"❌ Error during generation: {e}")
-            raise
-
-        st.success("Recon File Generated Successfully!")
-
-        st.download_button(
-            label="⬇️ Download Reconciliation_Mapped.xlsx",
-            data=output_bytes,
-            file_name="Reconciliation_Mapped.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-# === LOAD DATA (Streamlit will pass file-like objects instead of paths) ===
-def load_input_files(trial_balance_file, entries_file, mapping_file, icp_code):
-    """
-    Returns:
-        trial_balance, entries, mapping_dir, acct_to_code, code_to_meta, ICP
-    """
-    ICP = icp_code.strip().upper()
-
-    trial_balance = pd.read_excel(trial_balance_file)
-    entries = pd.read_excel(entries_file)
-
-    acct_to_code, code_to_meta, map_dir = load_mapping(mapping_file)
-    trial_balance = apply_mapping(trial_balance, acct_to_code, code_to_meta)
-
-    # Normalize
-    entries.rename(
-        columns=lambda c: "Amount (LCY)" if str(c).strip().lower() in ["amount", "amount (lcy)"] else c,
-        inplace=True
-    )
-    entries.rename(
-        columns=lambda c: "ICP CODE" if str(c).strip().lower() == "icp code" else c,
-        inplace=True
-    )
-
-    trial_balance["Balance at Date"] = trial_balance["Balance at Date"].apply(to_float)
-    entries["G/L Account No."] = entries["G/L Account No."].apply(normalize_account)
-    entries["Amount (LCY)"] = entries["Amount (LCY)"].apply(to_float)
-    entries["Posting Date"] = pd.to_datetime(entries["Posting Date"], errors="coerce").dt.date
-
-    return trial_balance, entries, acct_to_code, code_to_meta, map_dir, ICP
-
-
-# === EXCEL STYLES ===
-thin = Side(border_style="thin", color="000000")
-thick = Side(border_style="medium", color="000000")
-
-green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-red_fill   = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-header_fill = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")
-entry_fill  = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
-total_fill  = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")
-
-
-# === BORDER DRAWING (unchanged) ===
-def apply_borders(ws, top, bottom, left, right):
-    for r in range(top, bottom + 1):
-        for c in range(left, right + 1):
-            ws.cell(r, c).border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    # Thick borders
-    for c in range(left, right + 1):
-        ws.cell(top, c).border    = Border(top=thick, left=thin, right=thin, bottom=thin)
-        ws.cell(bottom, c).border = Border(bottom=thick, left=thin, right=thin, top=thin)
-
-    for r in range(top, bottom + 1):
-        ws.cell(r, left).border  = Border(left=thick, top=thin, bottom=thin, right=thin)
-        ws.cell(r, right).border = Border(right=thick, top=thin, bottom=thin, left=thin)
-
-    # Corners
-    ws.cell(top, left).border     = Border(top=thick, left=thick, right=thin, bottom=thin)
-    ws.cell(top, right).border    = Border(top=thick, right=thick, left=thin, bottom=thin)
-    ws.cell(bottom, left).border  = Border(bottom=thick, left=thick, right=thin, top=thin)
-    ws.cell(bottom, right).border = Border(bottom=thick, right=thick, left=thin, top=thin)
-
-
-# === INTERNAL ZEROING (unchanged) ===
-def remove_internal_zeroes(df, tol=0.01):
-    df = df.sort_values("Posting Date", ascending=True).reset_index(drop=True)
-    keep = [True] * len(df)
-
-    for i in range(len(df)):
-        if not keep[i]:
-            continue
-        for j in range(i + 1, len(df)):
-            same_keys = (
-                df.loc[i, "Document No."] == df.loc[j, "Document No."]
-                and df.loc[i, "ICP CODE"] == df.loc[j, "ICP CODE"]
-                and df.loc[i, "GAAP Code"] == df.loc[j, "GAAP Code"]
-            )
-
-            if same_keys and keep[j] and abs(df.loc[i, "Amount (LCY)"] + df.loc[j, "Amount (LCY)"]) <= tol:
-                keep[i] = keep[j] = False
-                break
-
-    df = df[keep].copy()
-
-    df["cum"] = df["Amount (LCY)"].cumsum().round(2)
-    zero_indices = df.index[abs(df["cum"]) <= tol].tolist()
-
-    if zero_indices:
-        df = df.loc[zero_indices[-1] + 1:].copy()
-
-    return df
-
-    # === CREATE WORKBOOK ===
+ # === CREATE WORKBOOK ===
 def build_workbook(trial_balance, entries, map_dir, ICP):
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -430,6 +299,143 @@ def build_workbook(trial_balance, entries, map_dir, ICP):
         }
 
     return wb, sheet_status, account_anchor
+
+
+# ------------------------------------------------------
+# BUTTON
+# ------------------------------------------------------
+
+generate = st.button("Generate Recon File", type="primary")
+
+if generate:
+    if trial_balance_upload is None or entries_upload is None or ICP == "":
+        st.error("Please upload both files and input ICP Code.")
+        st.stop()
+
+    with st.spinner("Generating Recon File… please wait, this may take up to 20 seconds…"):
+
+        # LOAD USER FILES
+        trial_balance_df = pd.read_excel(trial_balance_upload)
+        entries_df = pd.read_excel(entries_upload)
+
+        # The next section calls your full original logic…
+        # The function is defined in MESSAGE 2
+        try:
+            output_bytes = build_recon_workbook(
+                trial_balance_df,
+                entries_df,
+                mapping_accounts_df,
+                mapping_dir_df,
+                plc_df,
+                ICP
+            )
+        except Exception as e:
+            st.error(f"❌ Error during generation: {e}")
+            raise
+
+        st.success("Recon File Generated Successfully!")
+
+        st.download_button(
+            label="⬇️ Download Reconciliation_Mapped.xlsx",
+            data=output_bytes,
+            file_name="Reconciliation_Mapped.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+# === LOAD DATA (Streamlit will pass file-like objects instead of paths) ===
+def load_input_files(trial_balance_file, entries_file, mapping_file, icp_code):
+    """
+    Returns:
+        trial_balance, entries, mapping_dir, acct_to_code, code_to_meta, ICP
+    """
+    ICP = icp_code.strip().upper()
+
+    trial_balance = pd.read_excel(trial_balance_file)
+    entries = pd.read_excel(entries_file)
+
+    acct_to_code, code_to_meta, map_dir = load_mapping(mapping_file)
+    trial_balance = apply_mapping(trial_balance, acct_to_code, code_to_meta)
+
+    # Normalize
+    entries.rename(
+        columns=lambda c: "Amount (LCY)" if str(c).strip().lower() in ["amount", "amount (lcy)"] else c,
+        inplace=True
+    )
+    entries.rename(
+        columns=lambda c: "ICP CODE" if str(c).strip().lower() == "icp code" else c,
+        inplace=True
+    )
+
+    trial_balance["Balance at Date"] = trial_balance["Balance at Date"].apply(to_float)
+    entries["G/L Account No."] = entries["G/L Account No."].apply(normalize_account)
+    entries["Amount (LCY)"] = entries["Amount (LCY)"].apply(to_float)
+    entries["Posting Date"] = pd.to_datetime(entries["Posting Date"], errors="coerce").dt.date
+
+    return trial_balance, entries, acct_to_code, code_to_meta, map_dir, ICP
+
+
+# === EXCEL STYLES ===
+thin = Side(border_style="thin", color="000000")
+thick = Side(border_style="medium", color="000000")
+
+green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+red_fill   = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+header_fill = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")
+entry_fill  = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+total_fill  = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")
+
+
+# === BORDER DRAWING (unchanged) ===
+def apply_borders(ws, top, bottom, left, right):
+    for r in range(top, bottom + 1):
+        for c in range(left, right + 1):
+            ws.cell(r, c).border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    # Thick borders
+    for c in range(left, right + 1):
+        ws.cell(top, c).border    = Border(top=thick, left=thin, right=thin, bottom=thin)
+        ws.cell(bottom, c).border = Border(bottom=thick, left=thin, right=thin, top=thin)
+
+    for r in range(top, bottom + 1):
+        ws.cell(r, left).border  = Border(left=thick, top=thin, bottom=thin, right=thin)
+        ws.cell(r, right).border = Border(right=thick, top=thin, bottom=thin, left=thin)
+
+    # Corners
+    ws.cell(top, left).border     = Border(top=thick, left=thick, right=thin, bottom=thin)
+    ws.cell(top, right).border    = Border(top=thick, right=thick, left=thin, bottom=thin)
+    ws.cell(bottom, left).border  = Border(bottom=thick, left=thick, right=thin, top=thin)
+    ws.cell(bottom, right).border = Border(bottom=thick, right=thick, left=thin, top=thin)
+
+
+# === INTERNAL ZEROING (unchanged) ===
+def remove_internal_zeroes(df, tol=0.01):
+    df = df.sort_values("Posting Date", ascending=True).reset_index(drop=True)
+    keep = [True] * len(df)
+
+    for i in range(len(df)):
+        if not keep[i]:
+            continue
+        for j in range(i + 1, len(df)):
+            same_keys = (
+                df.loc[i, "Document No."] == df.loc[j, "Document No."]
+                and df.loc[i, "ICP CODE"] == df.loc[j, "ICP CODE"]
+                and df.loc[i, "GAAP Code"] == df.loc[j, "GAAP Code"]
+            )
+
+            if same_keys and keep[j] and abs(df.loc[i, "Amount (LCY)"] + df.loc[j, "Amount (LCY)"]) <= tol:
+                keep[i] = keep[j] = False
+                break
+
+    df = df[keep].copy()
+
+    df["cum"] = df["Amount (LCY)"].cumsum().round(2)
+    zero_indices = df.index[abs(df["cum"]) <= tol].tolist()
+
+    if zero_indices:
+        df = df.loc[zero_indices[-1] + 1:].copy()
+
+    return df
+
 
 # -----------------------
 # ✅ MESSAGE 3 — Finalize workbook: Frontpage, save, color tabs
