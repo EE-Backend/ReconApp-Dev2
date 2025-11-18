@@ -191,7 +191,9 @@ def remove_internal_zeroes(df, tol=TOLERANCE):
 # === WORKBOOK BUILDING ===
 def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_meta, ICP, tolerance=TOLERANCE):
     """
-    Returns: openpyxl.Workbook object, sheet_status dict, account_anchor dict
+    Returns: openpyxl.Workbook object, sheet_status dict, account_anchor dict, mismatch_accounts list
+    mismatch_accounts: list of dicts with keys:
+        - No, Name, tb_balance, entries_sum, difference, sheet
     """
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -216,6 +218,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
 
     sheet_status = {}
     account_anchor = {}
+    mismatch_accounts = []  # NEW: detailed list of out-of-balance accounts
 
     # iterate mapping order
     for sheet_name in sheet_order:
@@ -254,9 +257,23 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
 
             # remove internal zeroes (only when Document No., ICP and GAAP match)
             acc_df = remove_internal_zeroes(acc_df)
-
             if acc_df.empty:
                 continue
+
+            # ---------- helper to register mismatches ----------
+            def register_mismatch(acc_no_local, acc_name_local, tb_balance, entries_sum, ws_title):
+                diff = round(entries_sum - tb_balance, 2)
+                if abs(diff) > tolerance:
+                    nonlocal sheet_mismatch
+                    sheet_mismatch = True
+                    mismatch_accounts.append({
+                        "No": acc_no_local,
+                        "Name": acc_name_local,
+                        "tb_balance": tb_balance,
+                        "entries_sum": entries_sum,
+                        "difference": diff,
+                        "sheet": ws_title,
+                    })
 
             # Special: account 731000 (show totals per ICP only)
             if acc_no == "731000":
@@ -270,8 +287,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
                 header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
                 account_anchor[acc_no] = (ws.title, row_cursor)
                 header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
+                register_mismatch(acc_no, acc_name, tb_bal, net_sum, ws.title)
 
                 row_cursor += 1
                 block_start = row_cursor
@@ -289,11 +305,11 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
                         cell.fill = entry_fill
                     row_cursor += 1
 
-                # Totals row (Account Total above the number OR as requested)
+                # Totals row
                 ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
                 vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
                 vcell.font = Font(bold=True)
-                for c in range(1, 6):
+                for c in range(1, 5 + 1):
                     ws.cell(row=row_cursor, column=c).fill = total_fill
 
                 apply_borders(ws, block_start, row_cursor, 1, 5)
@@ -312,8 +328,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
                 header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
                 account_anchor[acc_no] = (ws.title, row_cursor)
                 header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
+                register_mismatch(acc_no, acc_name, tb_bal, net_sum, ws.title)
 
                 row_cursor += 1
                 block_start = row_cursor
@@ -332,7 +347,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
                 ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
                 vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
                 vcell.font = Font(bold=True)
-                for c in range(1, 6):
+                for c in range(1, 5 + 1):
                     ws.cell(row=row_cursor, column=c).fill = total_fill
 
                 apply_borders(ws, block_start, row_cursor, 1, 5)
@@ -346,8 +361,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
                 header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
                 account_anchor[acc_no] = (ws.title, row_cursor)
                 header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
+                register_mismatch(acc_no, acc_name, tb_bal, net_sum, ws.title)
 
                 row_cursor += 1
                 block_start = row_cursor
@@ -355,7 +369,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
                 # First row: labels (Note header + Account Total label)
                 ws.cell(row=row_cursor, column=1, value="Note").font = Font(bold=True)
                 ws.cell(row=row_cursor, column=6, value="Account Total").font = Font(bold=True)
-                for c in range(1, 7):
+                for c in range(1, 6 + 1):
                     ws.cell(row=row_cursor, column=c).fill = total_fill
                 row_cursor += 1
 
@@ -363,8 +377,8 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
                 ws.cell(row=row_cursor, column=1, value="(See documentation)")
                 vcell = ws.cell(row=row_cursor, column=6, value=net_sum)
                 vcell.number_format = "#,##0.00"
-                for c in range(1, 7):
-                    ws.cell(row=row_cursor, column=c).fill = entry_fill
+                for c in range(1, 6 + 1):
+                    ws.cell(row[row_cursor], column=c).fill = entry_fill
 
                 apply_borders(ws, block_start, row_cursor, 1, 6)
                 row_cursor += 3
@@ -377,8 +391,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
             header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
             account_anchor[acc_no] = (ws.title, row_cursor)
             header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-            if abs(net_sum - tb_bal) > tolerance:
-                sheet_mismatch = True
+            register_mismatch(acc_no, acc_name, tb_bal, net_sum, ws.title)
 
             row_cursor += 1
             block_start = row_cursor
@@ -409,11 +422,23 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
 
         sheet_status[sheet_name] = {"mismatches": int(sheet_mismatch), "accounts": account_count}
 
-    return wb, sheet_status, account_anchor
+    return wb, sheet_status, account_anchor, mismatch_accounts
 
 
 # === FINALIZE: front page, formatting, save to bytes ===
-def finalize_workbook_to_bytes(wb, sheet_status, account_anchor, trial_balance_df, entries_df, ICP, plc_path=None, tolerance=TOLERANCE):
+def finalize_workbook_to_bytes(
+    wb,
+    sheet_status,
+    account_anchor,
+    trial_balance_df,
+    entries_df,
+    ICP,
+    plc_path=None,
+    tolerance=TOLERANCE,
+    mismatch_accounts=None,
+):
+    if mismatch_accounts is None:
+        mismatch_accounts = []    
     """
     Adds front page, number/date formatting, hides gridlines, autofit, and returns bytes buffer.
     """
@@ -494,9 +519,18 @@ def finalize_workbook_to_bytes(wb, sheet_status, account_anchor, trial_balance_d
     if not positives.empty:
         comments.append(f"{len(positives)} account(s) in the 400000+ range have positive balances.")
 
+    if mismatch_accounts:
+        comments.append(f"{len(mismatch_accounts)} account(s) have entry totals that do not match the trial balance. See list below.")
+
     mismatched_sheets = sum(v['mismatches'] for v in sheet_status.values()) if sheet_status else 0
-    if mismatched_sheets > 0:
+    if mismatched_sheets > 0 and not mismatch_accounts:
+        # keep the old sheet-level info only if we don't already show account-level detail
         comments.append(f"{mismatched_sheets} sheet(s) contain out-of-balance accounts exceeding tolerance {tolerance}.")
+    elif not negatives.empty and not positives.empty and not mismatch_accounts and mismatched_sheets == 0:
+        comments.append("All sheets appear balanced within tolerance limits.")
+    elif not negatives.empty or not positives.empty or mismatch_accounts:
+        # already have specific bullet(s), no generic message needed
+        pass
     else:
         comments.append("All sheets appear balanced within tolerance limits.")
 
@@ -541,7 +575,36 @@ def finalize_workbook_to_bytes(wb, sheet_status, account_anchor, trial_balance_d
             val_cell = ws_front.cell(row_ptr, 3, r["Balance at Date"])
             val_cell.number_format = "#,##0.00"
             row_ptr += 1
+    # NEW: Out-of-balance accounts (TB vs entries)
+    if mismatch_accounts:
+        row_ptr += 1
+        ws_front.cell(row_ptr, 1, "Accounts out of balance (TB vs entries):").font = Font(bold=True)
+        row_ptr += 1
 
+        # header row
+        headers = ["Account", "Name", "TB balance", "Entries sum", "Difference"]
+        for col_idx, h in enumerate(headers, start=1):
+            cell = ws_front.cell(row_ptr, col_idx, h)
+            cell.font = Font(bold=True)
+        row_ptr += 1
+
+        for m in mismatch_accounts:
+            acc = str(m["No"])
+            c = ws_front.cell(row_ptr, 1, acc)
+            set_hyperlink(c, acc)
+            ws_front.cell(row_ptr, 2, m.get("Name", ""))
+
+            tb_cell = ws_front.cell(row_ptr, 3, m.get("tb_balance", 0.0))
+            ent_cell = ws_front.cell(row_ptr, 4, m.get("entries_sum", 0.0))
+            diff_cell = ws_front.cell(row_ptr, 5, m.get("difference", 0.0))
+
+            tb_cell.number_format = "#,##0.00"
+            ent_cell.number_format = "#,##0.00"
+            diff_cell.number_format = "#,##0.00"
+
+            row_ptr += 1
+
+    
     # Footer metadata
     row_ptr += 2
     ws_front.cell(row_ptr, 1, f"Generated on: {pd.Timestamp.now():%Y-%m-%d %H:%M}")
@@ -622,8 +685,21 @@ def generate_reconciliation_file(trial_balance_file, entries_file, icp_code, map
     entries["Posting Date"] = pd.to_datetime(entries["Posting Date"], errors="coerce").dt.date
 
     # Build workbook
-    wb, sheet_status, account_anchor = build_workbook(trial_balance, entries, map_dir, acct_to_code, code_to_meta, icp_code, tolerance=tolerance)
+    wb, sheet_status, account_anchor, mismatch_accounts = build_workbook(
+    trial_balance, entries, map_dir, acct_to_code, code_to_meta, icp_code, tolerance=tolerance
+    )
 
     # Finalize & get bytes
-    bio = finalize_workbook_to_bytes(wb, sheet_status, account_anchor, trial_balance, entries, icp_code, plc_path=plc_path, tolerance=tolerance)
+    bio = finalize_workbook_to_bytes(
+    wb,
+    sheet_status,
+    account_anchor,
+    trial_balance,
+    entries,
+    icp_code,
+    plc_path=plc_path,
+    tolerance=tolerance,
+    mismatch_accounts=mismatch_accounts,
+    )
+
     return bio
