@@ -24,26 +24,29 @@ logo_path = STATIC_DIR / "logo.png"   # your actual logo
 
 
 # -------------------------------------------------------
-# HEADER (logo + title in same row)
+# HEADER (bigger logo + tighter spacing + inline layout)
 # -------------------------------------------------------
-col1, col2 = st.columns([1, 8])
+col1, col2 = st.columns([1, 10])
 
 with col1:
     if logo_path.exists():
-        st.image(str(logo_path), width=70)   # <<< Smaller logo
+        st.image(str(logo_path), width=110)   # <-- 50% bigger (previously 70)
     else:
         st.warning(f"⚠ Logo not found at: {logo_path}")
 
 with col2:
     st.markdown(
         """
-        <h1 style="margin-bottom:0px;">Recon File Generator</h1>
-        <p style="font-size:16px;margin-top:4px;">
-            Upload the required files below and generate a standardized reconciliation workbook.
-        </p>
+        <div style="display:flex; flex-direction:column; justify-content:center; margin-top:10px;">
+            <h1 style="margin-bottom:0px;">Recon File Generator</h1>
+            <p style="font-size:16px; margin-top:4px; margin-bottom:0px;">
+                Upload the required files below and generate a standardized reconciliation workbook.
+            </p>
+        </div>
         """,
         unsafe_allow_html=True
     )
+
 
 
 # -------------------------------------------------------
@@ -107,3 +110,4 @@ if generate_button:
 # -------------------------------------------------------
 st.write("---")
 st.caption("EE Internal Tool — Powered by Streamlit")
+
