@@ -226,6 +226,9 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
+    ICP_TOTAL_ONLY_ACCOUNTS = {"731000", "321000", "321001", "731001, 634010, 234110, 234110, 721000, 311000"}  
+
+
     # === TRIAL BALANCE TAB ===
     ws_tb = wb.create_sheet("Trial Balance (YTD)", 0)
     for c_idx, col in enumerate(trial_balance_df.columns, 1):
@@ -289,403 +292,71 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_
             if acc_df.empty:
                 continue
 
-            # Special: account 731000 (show totals per ICP only)
-            if acc_no == "731000":
-                grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
-                grouped["Description"] = grouped["ICP CODE"]
-                grouped["Document No."] = ""
-                grouped["GAAP Code"] = ""
-                acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
-                net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
 
-                header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
-                account_anchor[acc_no] = (ws.title, row_cursor)
-                header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
-                    mismatch_accounts.append({
-                        "No": acc_no,
-                        "Name": acc_name,
-                        "tb_balance": tb_bal,
-                        "entries_sum": net_sum,
-                        "difference": round(net_sum - tb_bal, 2),
-                    })
+        # ICP totals instead of all entries #
 
-                row_cursor += 1
-                block_start = row_cursor
-
-                # Column headers
+        if acc_no in ICP_TOTAL_ONLY_ACCOUNTS:
+            grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
+            grouped["Description"] = grouped["ICP CODE"]
+            grouped["Document No."] = ""
+            grouped["GAAP Code"] = ""
+            acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
+            net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
+        
+            # write header
+            header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
+            account_anchor[acc_no] = (ws.title, row_cursor)
+        
+            header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
+            if abs(net_sum - tb_bal) > tolerance:
+                sheet_mismatch = True
+                mismatch_accounts.append({
+                    "No": acc_no,
+                    "Name": acc_name,
+                    "tb_balance": tb_bal,
+                    "entries_sum": net_sum,
+                    "difference": round(net_sum - tb_bal, 2),
+                })
+        
+            row_cursor += 1
+            block_start = row_cursor
+        
+            # Column headers
+            for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
+                ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
+                ws.cell(row=row_cursor, column=c_idx).fill = header_fill
+            row_cursor += 1
+        
+            # Rows
+            for _, r in acc_view.iterrows():
                 for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                    ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
-                    ws.cell(row=row_cursor, column=c_idx).fill = header_fill
+                    cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
+                    cell.fill = entry_fill
                 row_cursor += 1
-
-                # Rows
-                for _, r in acc_view.iterrows():
-                    for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                        cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
-                        cell.fill = entry_fill
-                    row_cursor += 1
-
-                # Totals row (Account Total above the number OR as requested)
-                ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
-                vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
-                vcell.font = Font(bold=True)
-                for c in range(1, 6):
-                    ws.cell(row=row_cursor, column=c).fill = total_fill
-
-                apply_borders(ws, block_start, row_cursor, 1, 5)
-                row_cursor += 3
-                continue
+        
+            # Totals
+            ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
+            vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
+            vcell.font = Font(bold=True)
+            for c in range(1, 6):
+                ws.cell(row=row_cursor, column=c).fill = total_fill
+        
+            apply_borders(ws, block_start, row_cursor, 1, 5)
+            row_cursor += 3
+            continue
 
 
-            # Special: account 321001 (show totals per ICP only)
-            if acc_no == "321001":
-                grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
-                grouped["Description"] = grouped["ICP CODE"]
-                grouped["Document No."] = ""
-                grouped["GAAP Code"] = ""
-                acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
-                net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
-
-                header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
-                account_anchor[acc_no] = (ws.title, row_cursor)
-                header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
-                    mismatch_accounts.append({
-                        "No": acc_no,
-                        "Name": acc_name,
-                        "tb_balance": tb_bal,
-                        "entries_sum": net_sum,
-                        "difference": round(net_sum - tb_bal, 2),
-                    })
-
-                row_cursor += 1
-                block_start = row_cursor
-
-                # Column headers
-                for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                    ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
-                    ws.cell(row=row_cursor, column=c_idx).fill = header_fill
-                row_cursor += 1
-
-                # Rows
-                for _, r in acc_view.iterrows():
-                    for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                        cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
-                        cell.fill = entry_fill
-                    row_cursor += 1
-
-                # Totals row (Account Total above the number OR as requested)
-                ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
-                vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
-                vcell.font = Font(bold=True)
-                for c in range(1, 6):
-                    ws.cell(row=row_cursor, column=c).fill = total_fill
-
-                apply_borders(ws, block_start, row_cursor, 1, 5)
-                row_cursor += 3
-                continue
 
 
-            # Special: account 731001 (show totals per ICP only)
-            if acc_no == "731001":
-                grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
-                grouped["Description"] = grouped["ICP CODE"]
-                grouped["Document No."] = ""
-                grouped["GAAP Code"] = ""
-                acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
-                net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
-
-                header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
-                account_anchor[acc_no] = (ws.title, row_cursor)
-                header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
-                    mismatch_accounts.append({
-                        "No": acc_no,
-                        "Name": acc_name,
-                        "tb_balance": tb_bal,
-                        "entries_sum": net_sum,
-                        "difference": round(net_sum - tb_bal, 2),
-                    })
-
-                row_cursor += 1
-                block_start = row_cursor
-
-                # Column headers
-                for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                    ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
-                    ws.cell(row=row_cursor, column=c_idx).fill = header_fill
-                row_cursor += 1
-
-                # Rows
-                for _, r in acc_view.iterrows():
-                    for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                        cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
-                        cell.fill = entry_fill
-                    row_cursor += 1
-
-                # Totals row (Account Total above the number OR as requested)
-                ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
-                vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
-                vcell.font = Font(bold=True)
-                for c in range(1, 6):
-                    ws.cell(row=row_cursor, column=c).fill = total_fill
-
-                apply_borders(ws, block_start, row_cursor, 1, 5)
-                row_cursor += 3
-                continue
 
 
-            # Special: account 634010 (show totals per ICP only)
-            if acc_no == "634010":
-                grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
-                grouped["Description"] = grouped["ICP CODE"]
-                grouped["Document No."] = ""
-                grouped["GAAP Code"] = ""
-                acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
-                net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
 
-                header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
-                account_anchor[acc_no] = (ws.title, row_cursor)
-                header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
-                    mismatch_accounts.append({
-                        "No": acc_no,
-                        "Name": acc_name,
-                        "tb_balance": tb_bal,
-                        "entries_sum": net_sum,
-                        "difference": round(net_sum - tb_bal, 2),
-                    })
 
-                row_cursor += 1
-                block_start = row_cursor
-
-                # Column headers
-                for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                    ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
-                    ws.cell(row=row_cursor, column=c_idx).fill = header_fill
-                row_cursor += 1
-
-                # Rows
-                for _, r in acc_view.iterrows():
-                    for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                        cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
-                        cell.fill = entry_fill
-                    row_cursor += 1
-
-                # Totals row (Account Total above the number OR as requested)
-                ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
-                vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
-                vcell.font = Font(bold=True)
-                for c in range(1, 6):
-                    ws.cell(row=row_cursor, column=c).fill = total_fill
-
-                apply_borders(ws, block_start, row_cursor, 1, 5)
-                row_cursor += 3
-                continue
-
-            
-            # Special: account 234110 (show totals per ICP only)
-            if acc_no == "234110":
-                grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
-                grouped["Description"] = grouped["ICP CODE"]
-                grouped["Document No."] = ""
-                grouped["GAAP Code"] = ""
-                acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
-                net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
-
-                header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
-                account_anchor[acc_no] = (ws.title, row_cursor)
-                header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
-                    mismatch_accounts.append({
-                        "No": acc_no,
-                        "Name": acc_name,
-                        "tb_balance": tb_bal,
-                        "entries_sum": net_sum,
-                        "difference": round(net_sum - tb_bal, 2),
-                    })
-
-                row_cursor += 1
-                block_start = row_cursor
-
-                # Column headers
-                for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                    ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
-                    ws.cell(row=row_cursor, column=c_idx).fill = header_fill
-                row_cursor += 1
-
-                # Rows
-                for _, r in acc_view.iterrows():
-                    for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                        cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
-                        cell.fill = entry_fill
-                    row_cursor += 1
-
-                # Totals row (Account Total above the number OR as requested)
-                ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
-                vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
-                vcell.font = Font(bold=True)
-                for c in range(1, 6):
-                    ws.cell(row=row_cursor, column=c).fill = total_fill
-
-                apply_borders(ws, block_start, row_cursor, 1, 5)
-                row_cursor += 3
-                continue
-
-            # Special: account 721000 (show totals per ICP only)
-            if acc_no == "721000":
-                grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
-                grouped["Description"] = grouped["ICP CODE"]
-                grouped["Document No."] = ""
-                grouped["GAAP Code"] = ""
-                acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
-                net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
-
-                header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
-                account_anchor[acc_no] = (ws.title, row_cursor)
-                header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
-                    mismatch_accounts.append({
-                        "No": acc_no,
-                        "Name": acc_name,
-                        "tb_balance": tb_bal,
-                        "entries_sum": net_sum,
-                        "difference": round(net_sum - tb_bal, 2),
-                    })
-
-                row_cursor += 1
-                block_start = row_cursor
-
-                # Column headers
-                for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                    ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
-                    ws.cell(row=row_cursor, column=c_idx).fill = header_fill
-                row_cursor += 1
-
-                # Rows
-                for _, r in acc_view.iterrows():
-                    for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                        cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
-                        cell.fill = entry_fill
-                    row_cursor += 1
-
-                # Totals row (Account Total above the number OR as requested)
-                ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
-                vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
-                vcell.font = Font(bold=True)
-                for c in range(1, 6):
-                    ws.cell(row=row_cursor, column=c).fill = total_fill
-
-                apply_borders(ws, block_start, row_cursor, 1, 5)
-                row_cursor += 3
-                continue
-
-            # Special: account 311000 (show totals per ICP only)
-            if acc_no == "311000":
-                grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
-                grouped["Description"] = grouped["ICP CODE"]
-                grouped["Document No."] = ""
-                grouped["GAAP Code"] = ""
-                acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
-                net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
-
-                header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
-                account_anchor[acc_no] = (ws.title, row_cursor)
-                header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
-                    mismatch_accounts.append({
-                        "No": acc_no,
-                        "Name": acc_name,
-                        "tb_balance": tb_bal,
-                        "entries_sum": net_sum,
-                        "difference": round(net_sum - tb_bal, 2),
-                    })
-
-                row_cursor += 1
-                block_start = row_cursor
-
-                # Column headers
-                for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                    ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
-                    ws.cell(row=row_cursor, column=c_idx).fill = header_fill
-                row_cursor += 1
-
-                # Rows
-                for _, r in acc_view.iterrows():
-                    for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                        cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
-                        cell.fill = entry_fill
-                    row_cursor += 1
-
-                # Totals row (Account Total above the number OR as requested)
-                ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
-                vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
-                vcell.font = Font(bold=True)
-                for c in range(1, 6):
-                    ws.cell(row=row_cursor, column=c).fill = total_fill
-
-                apply_borders(ws, block_start, row_cursor, 1, 5)
-                row_cursor += 3
-                continue
 
 
 
 
             
-            
-            # Special: 321000 same as 731000 (kept for compatibility)
-            if acc_no == "321000":
-                grouped = acc_df.groupby("ICP CODE", as_index=False)["Amount (LCY)"].sum()
-                grouped["Description"] = grouped["ICP CODE"]
-                grouped["Document No."] = ""
-                grouped["GAAP Code"] = ""
-                acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
-                net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
-
-                header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
-                account_anchor[acc_no] = (ws.title, row_cursor)
-                header_cell.fill = green_fill if abs(net_sum - tb_bal) <= tolerance else red_fill
-                if abs(net_sum - tb_bal) > tolerance:
-                    sheet_mismatch = True
-                    mismatch_accounts.append({
-                        "No": acc_no,
-                        "Name": acc_name,
-                        "tb_balance": tb_bal,
-                        "entries_sum": net_sum,
-                        "difference": round(net_sum - tb_bal, 2),
-                    })
-
-                row_cursor += 1
-                block_start = row_cursor
-
-                for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                    ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
-                    ws.cell(row=row_cursor, column=c_idx).fill = header_fill
-                row_cursor += 1
-
-                for _, r in acc_view.iterrows():
-                    for c_idx, col in enumerate(["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"], 1):
-                        cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
-                        cell.fill = entry_fill
-                    row_cursor += 1
-
-                ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
-                vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
-                vcell.font = Font(bold=True)
-                for c in range(1, 6):
-                    ws.cell(row=row_cursor, column=c).fill = total_fill
-
-                apply_borders(ws, block_start, row_cursor, 1, 5)
-                row_cursor += 3
-                continue
 
             # Special: bank/cash accounts 390000–399999 -> totals only with note (See documentation)
             if acc_no.isdigit() and 390000 <= int(acc_no) <= 399999:
