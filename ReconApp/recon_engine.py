@@ -593,6 +593,12 @@ def finalize_workbook_to_bytes(
         mask_400_plus & (trial_balance_df["Balance at Date"] > 0),
         ["No.", "Name", "Balance at Date"]
     ]
+        # Unmapped accounts (sheet_group == "Unmapped")
+    unmapped_accounts = trial_balance_df.loc[
+        trial_balance_df.get("sheet_group", "").astype(str) == "Unmapped",
+        ["No.", "Name", "Balance at Date"]
+    ]
+
 
     if not negatives.empty:
         comments.append(f"{len(negatives)} account(s) in the 200000–399999 range have negative balances.")
@@ -689,6 +695,40 @@ def finalize_workbook_to_bytes(
         block_bottom = row_ptr - 1
         apply_borders(ws_front, top=block_top, bottom=block_bottom, left=1, right=5)
         row_ptr += 1
+
+        # === 1b) UNMAPPED ACCOUNTS (RED BLOCK) ===
+    if not unmapped_accounts.empty:
+        block_top = row_ptr
+        title_cell = ws_front.cell(row_ptr, 1, "Unmapped accounts (no mapping code):")
+        title_cell.font = Font(bold=True)
+        for c in range(1, 4):
+            ws_front.cell(row_ptr, c).fill = red_fill
+        row_ptr += 1
+
+        headers = ["Account", "Name", "TB balance"]
+        for col_idx, h in enumerate(headers, start=1):
+            cell = ws_front.cell(row_ptr, col_idx, h)
+            cell.font = Font(bold=True)
+            cell.fill = red_fill
+        row_ptr += 1
+
+        for _, r in unmapped_accounts.iterrows():
+            acc = str(r["No."])
+            ws_front.cell(row_ptr, 1, acc)
+            ws_front.cell(row_ptr, 2, r.get("Name", ""))
+            val_cell = ws_front.cell(row_ptr, 3, r["Balance at Date"])
+            val_cell.number_format = "#,##0.00"
+
+            # colour entire row red (same as out-of-balance)
+            for c in range(1, 4):
+                ws_front.cell(row_ptr, c).fill = red_fill
+
+            row_ptr += 1
+
+        block_bottom = row_ptr - 1
+        apply_borders(ws_front, top=block_top, bottom=block_bottom, left=1, right=3)
+        row_ptr += 1
+
 
     # === 2) NEGATIVE BALANCES ===
     if not negatives.empty:
