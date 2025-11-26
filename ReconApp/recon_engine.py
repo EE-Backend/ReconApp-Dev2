@@ -175,11 +175,15 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         - entry_fill
         - total_fill
         - green_fill / red_fill for control line
+    Totals are computed based on the numeric lines above (Option A).
     """
-    # Insert PL & Balance right after TB
-    pl_index = wb.sheetnames.index("Trial Balance (YTD)") + 1
-    ws = wb.create_sheet("PL & Balance", pl_index)
 
+    # Insert PL & Balance directly after Trial Balance (YTD)
+    try:
+        tb_index = wb.sheetnames.index("Trial Balance (YTD)")
+    except ValueError:
+        tb_index = 0
+    ws = wb.create_sheet("PL & Balance", tb_index + 1)
 
     # === Group mapping layouts (your screenshots) ===
     PL_LAYOUT = [
@@ -265,7 +269,21 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         ("", "Assets = Liabilities Control", None),
     ]
 
-    # === Compute mapping totals ===
+    # === Classification of rows for totals logic ===
+    pl_section_headers = {"Revenue"}
+    pl_subtotals = {"Gross Profit", "EBITDA", "Operating Profit", "Profit before tax"}
+    pl_grand_totals = {"Total profit"}
+
+    assets_section_headers = {"Non-current assets", "Current assets"}
+    assets_subtotals = {"Total non-current assets", "Total current assets"}
+    assets_grand_totals = {"Total assets"}
+
+    eq_section_headers = {"Equity", "Liabilities"}
+    eq_subtotals = {"Total Profit", "Total equity",
+                    "Total non-current liabilities", "Total current liabilities"}
+    eq_grand_totals = {"Total Liabilities"}
+
+    # === Compute mapping totals from trial balance ===
     totals = trial_balance_df.groupby("code")["Balance at Date"].sum().to_dict()
 
     def get_val(code):
@@ -273,92 +291,147 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
             return 0.0
         return totals.get(str(code), 0.0)
 
-    # === Writer helper ===
-    def write_block(start_row, layout, compute_totals=True):
-        row = start_row
-        block_top = row
+    # to later compute Assets = Liabilities Control
+    special_rows = {}  # desc -> row index
 
-        block_values = []
+    def write_block(start_row, layout, section_headers, subtotals, grand_totals):
+        """
+        Writes one of the three blocks (PL, Assets, Equity/Liabilities)
+        with:
+          - section totals (sum of lines since previous header/total)
+          - grand totals (sum of all numeric lines in the block)
+          - gaps between consecutive header/total rows
+        """
+        row = start_row
+        block_top = None
+        block_sum = 0.0        # all numeric rows in this block
+        segment_sum = 0.0      # numeric rows since last header/total
+        prev_is_group = False  # previous row had code == ""
 
         for code, desc, tab in layout:
-            # Column B – Group mapping code
+            is_group = (code == "")
+
+            # Gap between consecutive headers/totals
+            if prev_is_group and is_group:
+                for col in range(3, 6):  # C–E
+                    gap_cell = ws.cell(row, col, "")
+                    gap_cell.fill = entry_fill
+                row += 1
+            prev_is_group = is_group
+
+            # Block top row
+            if block_top is None:
+                block_top = row
+
+            # Set group mapping code in column B
             ws.cell(row, 2, code if code else "")
 
-            # Column C – Description
-            c = ws.cell(row, 3, desc)
-            c.font = Font(bold=(code == ""))
-
-            # Choose fill based on row type
-            fill = header_fill if code == "" else entry_fill
-            c.fill = fill
-
-            # Column D – Value
-            v = get_val(code) if code else None
-            block_values.append(v or 0)
-
+            desc_cell = ws.cell(row, 3, desc)
             val_cell = ws.cell(row, 4)
+            tab_cell = ws.cell(row, 5)
 
-            # Totals (section totals) use total_fill
-            if code == "":
-                val_cell.fill = header_fill if "Total " not in desc else total_fill
+            is_section_header = desc in section_headers
+            is_subtotal = desc in subtotals
+            is_grand = desc in grand_totals
+
+            # Determine row fill type
+            if code:  # numeric mapping row
+                row_fill = entry_fill
             else:
-                val_cell.fill = entry_fill
+                if is_subtotal or is_grand:
+                    row_fill = total_fill
+                else:
+                    row_fill = header_fill
 
-            if code:  # numeric rows
+            # Numeric mapping row
+            numeric_value = None
+            if code:
+                v = get_val(code)
+                numeric_value = v
+                block_sum += v
+                segment_sum += v
                 val_cell.value = v
                 val_cell.number_format = "#,##0.00"
             else:
-                val_cell.value = ""
+                # header / total rows
+                if is_subtotal:
+                    numeric_value = round(segment_sum, 2)
+                    val_cell.value = numeric_value
+                    val_cell.number_format = "#,##0.00"
+                    segment_sum = 0.0
+                elif is_grand:
+                    numeric_value = round(block_sum, 2)
+                    val_cell.value = numeric_value
+                    val_cell.number_format = "#,##0.00"
+                else:
+                    # pure header
+                    segment_sum = 0.0
+                    val_cell.value = ""
 
-            # Column E – Tab hyperlink
-            tab_cell = ws.cell(row, 5)
-            tab_cell.fill = fill
+            # Apply fills
+            desc_cell.fill = row_fill
+            val_cell.fill = row_fill
+            tab_cell.fill = row_fill
+
+            # Bold headers and totals
+            if is_section_header or is_subtotal or is_grand:
+                desc_cell.font = Font(bold=True)
+
+            # Tab column (E)
             if tab:
-                safe_tab = f"'{tab}'" if not tab.isalnum() else tab
                 tab_cell.value = tab
-                tab_cell.hyperlink = f"#{safe_tab}!A1"
-                tab_cell.style = "Hyperlink"
+                # Hyperlink ONLY if this row has a non-zero numeric value
+                if code and numeric_value not in (None, 0, 0.0):
+                    safe_tab = f"'{tab}'" if not tab.isalnum() else tab
+                    tab_cell.hyperlink = f"#{safe_tab}!A1"
+                    # manual hyperlink style so fill is preserved
+                    tab_cell.font = Font(color="0000FF", underline="single")
+            else:
+                tab_cell.value = ""
+
+            # Remember important rows for final control calc
+            if desc in {"Total assets", "Total Liabilities", "Assets = Liabilities Control"}:
+                special_rows[desc] = row
 
             row += 1
 
-        apply_borders(ws, block_top, row - 1, 2, 5)
-        return row + 1
+        # Borders only around visible columns C–E
+        if block_top is not None and row - 1 >= block_top:
+            apply_borders(ws, block_top, row - 1, 3, 5)
+
+        return row + 1  # one empty row between blocks
 
     # === Write all blocks ===
     r = 2
-    r = write_block(r, PL_LAYOUT)
-    r = write_block(r, ASSETS_LAYOUT)
-    r = write_block(r, EQUITY_LIAB_LAYOUT)
+    r = write_block(r, PL_LAYOUT, pl_section_headers, pl_subtotals, pl_grand_totals)
+    r = write_block(r, ASSETS_LAYOUT, assets_section_headers, assets_subtotals, assets_grand_totals)
+    r = write_block(r, EQUITY_LIAB_LAYOUT, eq_section_headers, eq_subtotals, eq_grand_totals)
 
-    # === Assets = Liabilities control row (last row in EQUITY_LIAB) ===
-    # Find last row with description
-    last_row = r - 2
-    desc = ws.cell(last_row, 3).value
-    if "Assets = Liabilities Control" in desc:
-        assets_total = None
-        liabilities_total = None
+    # === Assets = Liabilities Control (full-row highlight) ===
+    assets_row = special_rows.get("Total assets")
+    liab_row = special_rows.get("Total Liabilities")
+    ctrl_row = special_rows.get("Assets = Liabilities Control")
 
-        # Locate totals in column D
-        for row_i in range(2, last_row):
-            text = str(ws.cell(row_i, 3).value)
-            if text == "Total assets":
-                assets_total = ws.cell(row_i, 4).value
-            if text == "Total Liabilities":
-                liabilities_total = ws.cell(row_i, 4).value
+    if assets_row and liab_row and ctrl_row:
+        assets_val = ws.cell(assets_row, 4).value or 0.0
+        liab_val = ws.cell(liab_row, 4).value or 0.0
+        ctrl_val = round((assets_val or 0.0) - (liab_val or 0.0), 2)
 
-        ctrl_val = (assets_total or 0) - (liabilities_total or 0)
-        ctrl_cell = ws.cell(last_row, 4, ctrl_val)
+        # Write value in column D
+        ctrl_cell = ws.cell(ctrl_row, 4, ctrl_val)
         ctrl_cell.number_format = "#,##0.00"
 
-        # Color according to match
-        ctrl_cell.fill = green_fill if abs(ctrl_val) < 0.01 else red_fill
+        # Color ENTIRE ROW C–E green/red
+        ctrl_fill = green_fill if abs(ctrl_val) < 0.01 else red_fill
+        for col in range(3, 6):
+            ws.cell(ctrl_row, col).fill = ctrl_fill
 
     # === Hide mapping column B ===
     ws.column_dimensions["B"].hidden = True
 
-    # Autofit columns B–E
+    # Autofit columns
     for col in ws.columns:
-        max_len = max((len(str(c.value)) if c.value else 0) for c in col)
+        max_len = max((len(str(c.value)) if c.value else 0 for c in col), default=0)
         ws.column_dimensions[openpyxl.utils.get_column_letter(col[0].column)].width = max_len + 2
 
 ####### - 
