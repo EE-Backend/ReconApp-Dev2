@@ -429,8 +429,8 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
     r31 = code_row["31"]
     r39 = code_row["39"]
 
-    # Total equity = SUM(20–23) + Total profit
-    set_formula("Total equity", f"=SUM({d_ref(r20)}:{d_ref(r23)})+{d_ref(r_tp)}")
+    # Total equity = SUM(20–23)
+    set_formula("Total equity", f"=SUM({d_ref(r20)}:{d_ref(r23)})")
 
     # Total non-current liabilities = SUM(24,25,28,29,30) (contiguous in layout)
     set_formula("Total non-current liabilities", f"=SUM({d_ref(r24)}:{d_ref(r30)})")
@@ -460,7 +460,7 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
     total_ca_val = sum_codes([str(c) for c in [13, 14, 15, 16, 17, 19]])
     total_assets_val = total_nca_val + total_ca_val
 
-    total_equity_val = sum_codes([str(c) for c in [20, 21, 22, 23]]) 
+    total_equity_val = sum_codes([str(c) for c in [20, 21, 22, 23]]) + total_profit_val
     total_ncl_val = sum_codes([str(c) for c in [24, 25, 28, 29, 30]])
     total_cl_val = sum_codes([str(c) for c in [31, 33, 34, 35, 36, 37, 38, 39]])
     total_liab_val = total_equity_val + total_ncl_val + total_cl_val
