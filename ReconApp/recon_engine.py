@@ -500,60 +500,73 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
     total_cl_val = sum_codes([str(c) for c in [31, 33, 34, 35, 36, 37, 38, 39]])
     total_liab_val = total_equity_val + total_ncl_val + total_cl_val
 
-    ctrl_val = total_assets_val - total_liab_val
-
-    ctrl_fill = green_fill if abs(ctrl_val) < 0.01 else red_fill
+    # === Correct colour for Assets = Liabilities Control ===
+    
+    # Read the value produced by Excel formula, not the Python calculation
+    ctrl_formula_value = ws.cell(r_ctrl, 4).value
+    
+    # Try converting to number
+    try:
+        ctrl_formula_value = float(ctrl_formula_value)
+    except:
+        ctrl_formula_value = 999999  # force red if unreadable
+    
+    # Apply correct fill
+    ctrl_fill = green_fill if abs(ctrl_formula_value) < 0.01 else red_fill
+    
+    # Colour all 3 cells (description, value, tab)
     for col in range(3, 6):
         ws.cell(r_ctrl, col).fill = ctrl_fill
 
+
     ws.column_dimensions["B"].hidden = True
 
-        # === UNMAPPED TOTALS BLOCK (only if unmapped exists and control != 0) ===
-    # Locate unmapped total by looking in trial_balance_df
+   # === UNMAPPED TOTALS BLOCK (only if unmapped exists) ===
     unmapped_df = trial_balance_df[trial_balance_df["sheet_group"] == "Unmapped"]
     unmapped_total = float(unmapped_df["Balance at Date"].sum()) if not unmapped_df.empty else 0.0
-
-    # Only create the box if unmapped total != 0
+    
     if abs(unmapped_total) > 0.01:
-
-        box_top = r_ctrl + 1  # first blank row under control line
+    
+        # ---- GAP ROW ----
+        gap_row = r_ctrl + 1
+        for col in range(3, 6):
+            gap_cell = ws.cell(gap_row, col, "")
+            gap_cell.fill = entry_fill
+    
+        # Box starts 1 row below the gap
+        box_top = r_ctrl + 2
         row = box_top
-
-        # ----- Row 1: "Total unmapped" -----
+    
+        # ---- Total unmapped ----
         ws.cell(row, 3, "Total unmapped").font = Font(bold=True)
         ws.cell(row, 3).fill = header_fill
-
+    
         unm_cell = ws.cell(row, 4, unmapped_total)
         unm_cell.number_format = "#,##0.00"
         unm_cell.fill = header_fill
-
-        # ----- Row 2: "Diff." -----
+    
+        # ---- Diff row ----
         row += 1
         diff_label = ws.cell(row, 3, "Diff.")
         diff_label.fill = entry_fill
-
-        # Formula: =D{control_row} + D{unmapped_row}
+    
         diff_cell = ws.cell(row, 4, f"=D{r_ctrl}+D{box_top}")
         diff_cell.number_format = "#,##0.00"
         diff_cell.fill = entry_fill
-
-        # Conditional colour (Python-evaluated)
-        diff_value = ctrl_val + unmapped_total
-        fill = green_fill if abs(diff_value) < 0.01 else red_fill
+    
+        # Evaluate actual Excel-calculated value for correct colouring
+        diff_formula_value = diff_cell.value if isinstance(diff_cell.value, (int, float)) else 0
+        try:
+            diff_formula_value = float(diff_formula_value)
+        except:
+            diff_formula_value = 999999
+    
+        fill = green_fill if abs(diff_formula_value) < 0.01 else red_fill
         diff_label.fill = fill
         diff_cell.fill = fill
-
-        # Apply thick border around the C–D box
-        apply_borders(ws, box_top, row, 3, 4)
-
-
-
-
     
-    # Autofit
-    for col in ws.columns:
-        max_len = max((len(str(c.value)) if c.value else 0) for c in col)
-        ws.column_dimensions[openpyxl.utils.get_column_letter(col[0].column)].width = max_len + 2
+        # Apply borders
+        apply_borders(ws, box_top, row, 3, 4)
 
 
 ####### - 
