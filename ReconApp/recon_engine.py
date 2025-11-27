@@ -169,7 +169,9 @@ def apply_borders(ws, top, bottom, left, right):
 
 def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
     """
-    PL & Balance sheet tab with STATIC totals using explicit formulas.
+    Builds the PL & Balance sheet.
+    - Mapping lines (101, 102, 1, 2, 20, ...) are numeric values.
+    - Subtotals / totals are Excel formulas based on those rows.
     """
 
     # Insert after Trial Balance
@@ -231,13 +233,13 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         ("", "Total assets", None),
     ]
 
+    # NOTE: Total Profit row REMOVED from the Equity section per your request
     EQUITY_LIAB_LAYOUT = [
         ("", "Equity", None),
         ("20", "Share capital", "Equity"),
         ("21", "Retained earnings and reserves", "Equity"),
         ("22", "Hybrid Capital", "Equity"),
         ("23", "Minority interests", "Equity"),
-        ("", "Total Profit", None),
         ("", "Total equity", None),
 
         ("", "Liabilities", None),
@@ -248,6 +250,7 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         ("30", "Deferred tax", "Corp. & Deferred Tax"),
         ("", "Total non-current liabilities", None),
 
+        ("", "Current liabilities", None),
         ("31", "Project Financing", "Mortage Credit"),
         ("33", "Trade Payables", "Trade Payables"),
         ("34", "Derivatives, short term", "Derivatives"),
@@ -263,7 +266,7 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         ("", "Assets = Liabilities Control", None),
     ]
 
-    # === load balances grouped by mapping code ===
+    # === TB totals by mapping code ===
     code_totals = trial_balance_df.groupby("code")["Balance at Date"].sum().to_dict()
 
     def get_code_total(code: str) -> float:
@@ -271,9 +274,9 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
             return 0.0
         return float(code_totals.get(str(code), 0.0))
 
-    # Track where things are written
-    desc_row = {}      # description -> row index
-    code_row = {}      # mapping code -> row index
+    # Track where each description and mapping code ended up
+    desc_row = {}   # description -> row
+    code_row = {}   # mapping code -> row
 
     def write_block(start_row, layout):
         row = start_row
@@ -283,7 +286,7 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         for code, desc, tab in layout:
             is_group = (code == "")
 
-            # Gap between two header/total rows
+            # Gap between consecutive header/total rows
             if prev_group and is_group:
                 for col in range(3, 6):
                     gap_cell = ws.cell(row, col, "")
@@ -294,28 +297,27 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
             # Column B: group mapping
             ws.cell(row, 2, code if code else "")
 
-            # Description (C)
+            # Column C: description
             desc_cell = ws.cell(row, 3, desc)
 
-            # Value (D)
+            # Column D: numeric / formula (initially empty for totals)
             val_cell = ws.cell(row, 4)
 
-            # Decide fill
-            if code:  # numeric line
-                fill = entry_fill
+            # Choose fill
+            if code:
+                row_fill = entry_fill
             else:
-                if "Total" in desc or desc in ("Gross Profit", "EBITDA",
-                                               "Operating Profit", "Profit before tax"):
-                    fill = total_fill
+                if "Total" in desc or desc in ("Gross Profit", "EBITDA", "Operating Profit", "Profit before tax"):
+                    row_fill = total_fill
                 else:
-                    fill = header_fill
+                    row_fill = header_fill
 
-            desc_cell.fill = fill
-            val_cell.fill = fill
+            desc_cell.fill = row_fill
+            val_cell.fill = row_fill
 
-            # Tab (E)
+            # Column E: Tab
             tab_cell = ws.cell(row, 5)
-            tab_cell.fill = fill
+            tab_cell.fill = row_fill
 
             if code:
                 v = get_code_total(code)
@@ -324,14 +326,17 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
 
                 if tab:
                     tab_cell.value = tab
-                    if abs(v) > 0.00001:
+                    if abs(v) > 0.00001:  # hyperlink only if non-zero
                         safe_tab = f"'{tab}'" if not tab.isalnum() else tab
                         tab_cell.hyperlink = f"#{safe_tab}!A1"
                         tab_cell.font = Font(color="0000FF", underline="single")
             else:
                 tab_cell.value = ""
 
-            # store positions
+            # Bold headers / totals
+            if code == "" or "Total" in desc or desc in ("Gross Profit", "EBITDA", "Operating Profit", "Profit before tax"):
+                desc_cell.font = Font(bold=True)
+
             desc_row[desc] = row
             if code:
                 code_row[code] = row
@@ -342,80 +347,135 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         apply_borders(ws, block_top, row - 1, 3, 5)
         return row + 1
 
-    # === Write all three blocks ===
+    # === Write the three blocks ===
     r = 2
     r = write_block(r, PL_LAYOUT)
     r = write_block(r, ASSETS_LAYOUT)
     r = write_block(r, EQUITY_LIAB_LAYOUT)
 
-    # Helper to get current numeric value from a code row (what user sees in sheet)
-    def val_for_code(code: str) -> float:
-        r_ = code_row.get(code)
+    # Helper to set a formula in the D-column of a description row
+    def set_formula(desc: str, formula: str):
+        r_ = desc_row.get(desc)
         if not r_:
-            return 0.0
-        v = ws.cell(r_, 4).value
-        return float(v or 0.0)
+            return
+        cell = ws.cell(r_, 4)
+        cell.value = formula
+        cell.number_format = "#,##0.00"
 
-    def set_total(desc: str, value: float):
-        r_ = desc_row[desc]
-        c = ws.cell(r_, 4, round(float(value), 2))
-        c.number_format = "#,##0.00"
+    # Shortcuts for "D[row]"
+    def d_ref(row: int) -> str:
+        return f"D{row}"
 
-    # === P&L totals (static numbers) ===
-    gross_profit = sum(val_for_code(c) for c in ["101", "102", "103", "104", "105"])
-    set_total("Gross Profit", gross_profit)
+    # === P&L formulas ===
+    r_gp   = desc_row["Gross Profit"]
+    r_ebit = desc_row["EBITDA"]
+    r_op   = desc_row["Operating Profit"]
+    r_pbt  = desc_row["Profit before tax"]
+    r_tp   = desc_row["Total profit"]
 
-    ebitda = gross_profit + sum(val_for_code(c) for c in ["106", "107"])
-    set_total("EBITDA", ebitda)
+    r101 = code_row["101"]
+    r105 = code_row["105"]
+    r106 = code_row["106"]
+    r107 = code_row["107"]
+    r108 = code_row["108"]
+    r109 = code_row["109"]
+    r110 = code_row["110"]
+    r111 = code_row["111"]
 
-    operating_profit = ebitda + val_for_code("108")
-    set_total("Operating Profit", operating_profit)
+    # Gross profit = SUM(101–105)
+    set_formula("Gross Profit", f"=SUM({d_ref(r101)}:{d_ref(r105)})")
 
-    pbt = operating_profit + sum(val_for_code(c) for c in ["109", "110"])
-    set_total("Profit before tax", pbt)
+    # EBITDA = Gross profit + (106+107)
+    set_formula("EBITDA", f"={d_ref(r_gp)}+({d_ref(r106)}+{d_ref(r107)})")
 
-    total_profit = pbt + val_for_code("111")
-    set_total("Total profit", total_profit)
+    # Operating profit = EBITDA + 108
+    set_formula("Operating Profit", f"={d_ref(r_ebit)}+{d_ref(r108)}")
 
-    # === Assets totals ===
-    total_nca = sum(val_for_code(str(c)) for c in range(1, 13))   # 1–12
-    set_total("Total non-current assets", total_nca)
+    # Profit before tax = Operating profit + (109+110)
+    set_formula("Profit before tax", f"={d_ref(r_op)}+({d_ref(r109)}+{d_ref(r110)})")
 
-    total_ca = sum(val_for_code(str(c)) for c in [13, 14, 15, 16, 17, 19])
-    set_total("Total current assets", total_ca)
+    # Total profit = Profit before tax + 111
+    set_formula("Total profit", f"={d_ref(r_pbt)}+{d_ref(r111)}")
 
-    total_assets = total_nca + total_ca
-    set_total("Total assets", total_assets)
+    # === Assets formulas ===
+    r_tnca = desc_row["Total non-current assets"]
+    r_tca  = desc_row["Total current assets"]
+    r_ta   = desc_row["Total assets"]
 
-    # === Equity & Liabilities totals ===
-    total_equity = sum(val_for_code(str(c)) for c in [20, 21, 22, 23]) + total_profit
-    set_total("Total equity", total_equity)
+    r1  = code_row["1"]
+    r12 = code_row["12"]
+    r13 = code_row["13"]
+    r19 = code_row["19"]
 
-    total_noncur_liab = sum(val_for_code(str(c)) for c in [24, 25, 28, 29, 30])
-    set_total("Total non-current liabilities", total_noncur_liab)
+    # Total non-current assets = SUM(1–12)
+    set_formula("Total non-current assets", f"=SUM({d_ref(r1)}:{d_ref(r12)})")
 
-    total_cur_liab = sum(val_for_code(str(c)) for c in [31, 33, 34, 35, 36, 37, 38, 39])
-    set_total("Total current liabilities", total_cur_liab)
+    # Total current assets = SUM(13–17,19) (contiguous codes in layout)
+    set_formula("Total current assets", f"=SUM({d_ref(r13)}:{d_ref(r19)})")
 
-    total_liabilities = total_equity + total_noncur_liab + total_cur_liab
-    set_total("Total Liabilities", total_liabilities)
+    # Total assets = Total non-current + Total current
+    set_formula("Total assets", f"={d_ref(r_tnca)}+{d_ref(r_tca)}")
 
-    # === Assets = Liabilities Control (full-row highlight) ===
-    ctrl_row = desc_row["Assets = Liabilities Control"]
-    ctrl_val = total_assets - total_liabilities
+    # === Equity & Liabilities formulas ===
+    r_teq   = desc_row["Total equity"]
+    r_tncl  = desc_row["Total non-current liabilities"]
+    r_tcl   = desc_row["Total current liabilities"]
+    r_tl    = desc_row["Total Liabilities"]
 
+    r20 = code_row["20"]
+    r23 = code_row["23"]
+    r24 = code_row["24"]
+    r30 = code_row["30"]
+    r31 = code_row["31"]
+    r39 = code_row["39"]
+
+    # Total equity = SUM(20–23) + Total profit
+    set_formula("Total equity", f"=SUM({d_ref(r20)}:{d_ref(r23)})+{d_ref(r_tp)}")
+
+    # Total non-current liabilities = SUM(24,25,28,29,30) (contiguous in layout)
+    set_formula("Total non-current liabilities", f"=SUM({d_ref(r24)}:{d_ref(r30)})")
+
+    # Total current liabilities = SUM(31,33,34,35,36,37,38,39) (contiguous in layout)
+    set_formula("Total current liabilities", f"=SUM({d_ref(r31)}:{d_ref(r39)})")
+
+    # Total Liabilities = Total equity + Total non-current + Total current
+    set_formula("Total Liabilities", f"={d_ref(r_teq)}+{d_ref(r_tncl)}+{d_ref(r_tcl)}")
+
+    # === Assets = Liabilities Control ===
+    r_ctrl = desc_row["Assets = Liabilities Control"]
+    set_formula("Assets = Liabilities Control", f"={d_ref(r_ta)}-{d_ref(r_tl)}")
+
+    # Colour control row (green if ~0, red otherwise) using Python-calculated values
+    # (same logic as the formulas, just evaluated once)
+    def sum_codes(code_list):
+        return sum(get_code_total(c) for c in code_list)
+
+    gross_profit_val = sum_codes(["101", "102", "103", "104", "105"])
+    ebitda_val = gross_profit_val + sum_codes(["106", "107"])
+    op_val = ebitda_val + get_code_total("108")
+    pbt_val = op_val + sum_codes(["109", "110"])
+    total_profit_val = pbt_val + get_code_total("111")
+
+    total_nca_val = sum_codes([str(c) for c in range(1, 13)])
+    total_ca_val = sum_codes([str(c) for c in [13, 14, 15, 16, 17, 19]])
+    total_assets_val = total_nca_val + total_ca_val
+
+    total_equity_val = sum_codes([str(c) for c in [20, 21, 22, 23]]) + total_profit_val
+    total_ncl_val = sum_codes([str(c) for c in [24, 25, 28, 29, 30]])
+    total_cl_val = sum_codes([str(c) for c in [31, 33, 34, 35, 36, 37, 38, 39]])
+    total_liab_val = total_equity_val + total_ncl_val + total_cl_val
+
+    ctrl_val = total_assets_val - total_liab_val
+
+    ctrl_fill = green_fill if abs(ctrl_val) < 0.01 else red_fill
     for col in range(3, 6):
-        ws.cell(ctrl_row, col).fill = green_fill if abs(ctrl_val) < 0.01 else red_fill
+        ws.cell(r_ctrl, col).fill = ctrl_fill
 
-    ctrl_cell = ws.cell(ctrl_row, 4, round(ctrl_val, 2))
-    ctrl_cell.number_format = "#,##0.00"
-
-    # Hide mapping column
     ws.column_dimensions["B"].hidden = True
 
     # Autofit
     for col in ws.columns:
-        max_len = max((len(str(c.value)) if c.value else 0 for c in col), default=0)
+        max_len = max((len(str(c.value)) if c.value else 0) for c in col)
         ws.column_dimensions[openpyxl.utils.get_column_letter(col[0].column)].width = max_len + 2
 
 
