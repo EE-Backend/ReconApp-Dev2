@@ -8,14 +8,16 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.drawing.image import Image
 import openpyxl.utils
+import time
 
+#Update#
 # === CONFIG / Defaults ===
 TOLERANCE = 0.001
 
 # By default mapping and plc files are expected in ./static/
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
-DEFAULT_MAPPING = STATIC_DIR / "mapping.xlsx"
+DEFAULT_MAPPING = STATIC_DIR / "mapping_data.xlsx"
 DEFAULT_PLC = STATIC_DIR / "PLC_data.xlsx"
 
 
@@ -32,9 +34,8 @@ def to_float(val):
     val = str(val).replace(",", ".").replace(" ", "")
     try:
         return round(float(val), 2)
-    except Exception:
+    except:
         return 0.0
-
 
 def hyperlink_to_frontpage(cell):
     """Convert a cell into a hyperlink pointing back to the frontpage."""
@@ -49,13 +50,13 @@ def _normalize_code(x):
     try:
         f = float(x)
         return str(int(f)) if f.is_integer() else str(f).rstrip("0").rstrip(".")
-    except Exception:
+    except:
         s = str(x).strip()
         if s.replace(".", "", 1).isdigit():
             try:
                 f = float(s)
                 return str(int(f)) if f.is_integer() else s
-            except Exception:
+            except:
                 pass
         return s
 
@@ -86,15 +87,13 @@ def load_mapping(mapping_path=None):
     book = pd.read_excel(mapping_path, sheet_name=None)
 
     if "account_mapping" not in book or "mapping_directory" not in book:
-        raise KeyError("mapping.xlsx must include sheets 'account_mapping' and 'mapping_directory'")
+        raise KeyError("mapping_data.xlsx must include sheets 'account_mapping' and 'mapping_directory'")
 
     map_accounts = book["account_mapping"].rename(columns={"Mapping": "code"}).copy()
     map_dir = book["mapping_directory"].copy()
 
     # Normalize
-    map_accounts["Account no."] = (
-        map_accounts["Account no."].astype(str).str.strip().apply(normalize_account)
-    )
+    map_accounts["Account no."] = map_accounts["Account no."].astype(str).str.strip().apply(normalize_account)
     map_accounts["code"] = map_accounts["code"].apply(_normalize_code)
 
     map_dir["code"] = map_dir["code"].apply(_normalize_code)
@@ -107,24 +106,16 @@ def load_mapping(mapping_path=None):
     return acct_to_code, code_to_meta, map_dir
 
 
-def apply_mapping(trial_balance, acct_to_code, code_to_meta,
-                  bank_code="19", bank_ranges=((390000, 399999),)):
+def apply_mapping(trial_balance, acct_to_code, code_to_meta, bank_code="19", bank_ranges=((390000, 399999),)):
     tb = trial_balance.copy()
     tb["No."] = tb["No."].astype(str).str.strip().apply(normalize_account)
     tb["code"] = tb["No."].map(acct_to_code)
 
     def _in_ranges(acc_str, ranges):
-        return (
-            bool(acc_str)
-            and acc_str.isdigit()
-            and any(lo <= int(acc_str) <= hi for lo, hi in ranges)
-        )
+        return bool(acc_str) and acc_str.isdigit() and any(lo <= int(acc_str) <= hi for lo, hi in ranges)
 
     unmapped = tb["code"].isna()
-    tb.loc[
-        unmapped & tb["No."].apply(lambda s: _in_ranges(s, bank_ranges)),
-        "code",
-    ] = bank_code
+    tb.loc[unmapped & tb["No."].apply(lambda s: _in_ranges(s, bank_ranges)), "code"] = bank_code
 
     tb["header"] = tb["code"].map(lambda c: code_to_meta.get(c, {}).get("header"))
     tb["sheet_group"] = tb["code"].map(lambda c: code_to_meta.get(c, {}).get("sheet"))
@@ -143,10 +134,10 @@ entry_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="so
 total_fill = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")    # totals
 plc_fill = PatternFill(start_color="9AD29F", end_color="9AD29F", fill_type="solid")
 
-
 def apply_borders(ws, top, bottom, left, right):
     """
-    Draw neat rectangle with thick external lines and thin internal lines.
+    Draw neat rectangle with thick external lines and thin internal lines
+    Ensures thick border above/below column A and last Amount column as requested.
     """
     # thin grid everywhere in the block
     for r in range(top, bottom + 1):
@@ -157,35 +148,15 @@ def apply_borders(ws, top, bottom, left, right):
     for c in range(left, right + 1):
         top_cell = ws.cell(top, c)
         bottom_cell = ws.cell(bottom, c)
-        top_cell.border = Border(
-            top=thick,
-            left=top_cell.border.left,
-            right=top_cell.border.right,
-            bottom=top_cell.border.bottom,
-        )
-        bottom_cell.border = Border(
-            bottom=thick,
-            left=bottom_cell.border.left,
-            right=bottom_cell.border.right,
-            top=bottom_cell.border.top,
-        )
+        top_cell.border = Border(top=thick, left=top_cell.border.left, right=top_cell.border.right, bottom=top_cell.border.bottom)
+        bottom_cell.border = Border(bottom=thick, left=bottom_cell.border.left, right=bottom_cell.border.right, top=bottom_cell.border.top)
 
     # thick left & right sides
     for r in range(top, bottom + 1):
         left_cell = ws.cell(r, left)
         right_cell = ws.cell(r, right)
-        left_cell.border = Border(
-            left=thick,
-            top=left_cell.border.top,
-            bottom=left_cell.border.bottom,
-            right=left_cell.border.right,
-        )
-        right_cell.border = Border(
-            right=thick,
-            top=right_cell.border.top,
-            bottom=right_cell.border.bottom,
-            left=right_cell.border.left,
-        )
+        left_cell.border = Border(left=thick, top=left_cell.border.top, bottom=left_cell.border.bottom, right=left_cell.border.right)
+        right_cell.border = Border(right=thick, top=right_cell.border.top, bottom=right_cell.border.bottom, left=right_cell.border.left)
 
     # corners: ensure they have both thick sides
     ws.cell(top, left).border = Border(top=thick, left=thick, right=thin, bottom=thin)
@@ -193,6 +164,7 @@ def apply_borders(ws, top, bottom, left, right):
     ws.cell(bottom, left).border = Border(bottom=thick, left=thick, right=thin, top=thin)
     ws.cell(bottom, right).border = Border(bottom=thick, right=thick, left=thin, top=thin)
 
+####### NEW CODE FRESHLY BAKED 
 
 def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
     """
@@ -260,6 +232,7 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         ("", "Total assets", None),
     ]
 
+
     EQUITY_LIAB_LAYOUT = [
         ("", "Equity", None),
         ("20", "Share capital", "Equity"),
@@ -309,10 +282,10 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         row = start_row
         block_top = row
         prev_group = False
-
+    
         for code, desc, tab in layout:
             is_group = (code == "")
-
+    
             # Gap between consecutive header/total rows
             if prev_group and is_group:
                 for col in range(3, 6):
@@ -320,35 +293,42 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
                     gap_cell.fill = entry_fill
                 row += 1
             prev_group = is_group
-
+    
             # Column B: mapping code
             ws.cell(row, 2, code if code else "")
-
+    
             # Column C: description
             desc_cell = ws.cell(row, 3, desc)
-
+    
             # Column D: value (placeholder)
             val_cell = ws.cell(row, 4)
-
-            # === SPECIAL CASE: Total profit inside Equity section ===
+    
+            # === ⭐ SPECIAL CASE: Total profit inside Equity section ⭐ ===
             if code == "TP_EQUITY":
+                # Description formatting
                 desc_cell.font = Font(bold=True)
                 desc_cell.fill = entry_fill
-
+    
+                # Value = reference main P&L total profit
                 tp_main_row = desc_row["Total profit"]  # P&L total profit row
                 val_cell.value = f"=D{tp_main_row}"
                 val_cell.number_format = "#,##0.00"
                 val_cell.fill = entry_fill
-
+    
+                # No code / no hyperlink
                 ws.cell(row, 2, "")
                 tab_cell = ws.cell(row, 5, "")
                 tab_cell.fill = entry_fill
-
+    
+                # Track row
                 desc_row[desc] = row
+    
                 row += 1
                 continue
             # === END SPECIAL CASE ===
-
+    
+            # === STANDARD LINE HANDLING ===
+    
             # Determine row fill
             if code:
                 row_fill = entry_fill
@@ -359,19 +339,19 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
                     row_fill = total_fill
                 else:
                     row_fill = header_fill
-
+    
             desc_cell.fill = row_fill
             val_cell.fill = row_fill
-
+    
             # Column E: Tab cell
             tab_cell = ws.cell(row, 5)
             tab_cell.fill = row_fill
-
+    
             if code:
                 v = get_code_total(code)
                 val_cell.value = v
                 val_cell.number_format = "#,##0.00"
-
+    
                 if tab:
                     tab_cell.value = tab
                     if abs(v) > 0.00001:
@@ -380,21 +360,24 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
                         tab_cell.font = Font(color="0000FF", underline="single")
             else:
                 tab_cell.value = ""
-
+    
             # Bold formatting for headers/totals
             if code == "" or "Total" in desc or desc in (
                 "Gross Profit", "EBITDA", "Operating Profit", "Profit before tax"
             ):
                 desc_cell.font = Font(bold=True)
-
+    
+            # Track rows
             desc_row[desc] = row
             if code:
                 code_row[code] = row
-
+    
             row += 1
-
+    
         apply_borders(ws, block_top, row - 1, 3, 5)
         return row + 1
+
+
 
     # === Write the three blocks ===
     r = 2
@@ -411,8 +394,9 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
         cell.value = formula
         cell.number_format = "#,##0.00"
 
-    def d_ref(row_idx: int) -> str:
-        return f"D{row_idx}"
+    # Shortcuts for "D[row]"
+    def d_ref(row: int) -> str:
+        return f"D{row}"
 
     # === P&L formulas ===
     r_gp   = desc_row["Gross Profit"]
@@ -430,10 +414,19 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
     r110 = code_row["110"]
     r111 = code_row["111"]
 
+    # Gross profit = SUM(101–105)
     set_formula("Gross Profit", f"=SUM({d_ref(r101)}:{d_ref(r105)})")
+
+    # EBITDA = Gross profit + (106+107)
     set_formula("EBITDA", f"={d_ref(r_gp)}+({d_ref(r106)}+{d_ref(r107)})")
+
+    # Operating profit = EBITDA + 108
     set_formula("Operating Profit", f"={d_ref(r_ebit)}+{d_ref(r108)}")
+
+    # Profit before tax = Operating profit + (109+110)
     set_formula("Profit before tax", f"={d_ref(r_op)}+({d_ref(r109)}+{d_ref(r110)})")
+
+    # Total profit = Profit before tax + 111
     set_formula("Total profit", f"={d_ref(r_pbt)}+{d_ref(r111)}")
 
     # === Assets formulas ===
@@ -446,8 +439,13 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
     r13 = code_row["13"]
     r19 = code_row["19"]
 
+    # Total non-current assets = SUM(1–12)
     set_formula("Total non-current assets", f"=SUM({d_ref(r1)}:{d_ref(r12)})")
+
+    # Total current assets = SUM(13–17,19) (contiguous codes in layout)
     set_formula("Total current assets", f"=SUM({d_ref(r13)}:{d_ref(r19)})")
+
+    # Total assets = Total non-current + Total current
     set_formula("Total assets", f"={d_ref(r_tnca)}+{d_ref(r_tca)}")
 
     # === Equity & Liabilities formulas ===
@@ -463,96 +461,139 @@ def add_pl_balance_sheet(wb, trial_balance_df, code_to_meta):
     r31 = code_row["31"]
     r39 = code_row["39"]
 
-    r_tp_equity = desc_row["Total profit"]  # Total profit line in Equity block
+    # Total equity = SUM(20–23) + Total profit
+    r_tp_equity = desc_row["Total profit"]  # the new one inside Equity
     set_formula("Total equity", f"=SUM({d_ref(r20)}:{d_ref(r_tp_equity)})")
+
+
+    # Total non-current liabilities = SUM(24,25,28,29,30) (contiguous in layout)
     set_formula("Total non-current liabilities", f"=SUM({d_ref(r24)}:{d_ref(r30)})")
+
+    # Total current liabilities = SUM(31,33,34,35,36,37,38,39) (contiguous in layout)
     set_formula("Total current liabilities", f"=SUM({d_ref(r31)}:{d_ref(r39)})")
+
+    # Total Liabilities = Total equity + Total non-current + Total current
     set_formula("Total Liabilities", f"={d_ref(r_teq)}+{d_ref(r_tncl)}+{d_ref(r_tcl)}")
 
     # === Assets = Liabilities Control ===
     r_ctrl = desc_row["Assets = Liabilities Control"]
     set_formula("Assets = Liabilities Control", f"={d_ref(r_ta)}+{d_ref(r_tl)}")
 
-    # Pre-calculated values (only used for internal checks earlier; formatting now simplified)
+    # Colour control row (green if ~0, red otherwise) using Python-calculated values
+    # (same logic as the formulas, just evaluated once)
     def sum_codes(code_list):
         return sum(get_code_total(c) for c in code_list)
+
+    gross_profit_val = sum_codes(["101", "102", "103", "104", "105"])
+    ebitda_val = gross_profit_val + sum_codes(["106", "107"])
+    op_val = ebitda_val + get_code_total("108")
+    pbt_val = op_val + sum_codes(["109", "110"])
+    total_profit_val = pbt_val + get_code_total("111")
+
+    total_nca_val = sum_codes([str(c) for c in range(1, 13)])
+    total_ca_val = sum_codes([str(c) for c in [13, 14, 15, 16, 17, 19]])
+    total_assets_val = total_nca_val + total_ca_val
+
+    total_equity_val = sum_codes([str(c) for c in [20, 21, 22, 23]]) + total_profit_val
+    total_ncl_val = sum_codes([str(c) for c in [24, 25, 28, 29, 30]])
+    total_cl_val = sum_codes([str(c) for c in [31, 33, 34, 35, 36, 37, 38, 39]])
+    total_liab_val = total_equity_val + total_ncl_val + total_cl_val
 
     # Format the Assets = Liabilities Control line as a header
     for col in range(3, 6):
         cell = ws.cell(r_ctrl, col)
         cell.fill = header_fill
+    
+    # Bold description only
     ws.cell(r_ctrl, 3).font = Font(bold=True)
+    # Value cell not bold
     ws.cell(r_ctrl, 4).font = Font(bold=False)
+
 
     ws.column_dimensions["B"].hidden = True
 
-    # === UNMAPPED TOTALS BLOCK (only if unmapped exists) ===
+   # === UNMAPPED TOTALS BLOCK (only if unmapped exists) ===
     unmapped_df = trial_balance_df[trial_balance_df["sheet_group"] == "Unmapped"]
     unmapped_total = float(unmapped_df["Balance at Date"].sum()) if not unmapped_df.empty else 0.0
-
+    
     if abs(unmapped_total) > 0.01:
-        # Gap row
+    
+        # ---- GAP ROW ----
+       # Insert gap row before unmapped box (blank white row)
         gap_row = r_ctrl + 1
         for col in range(3, 6):
             gap_cell = ws.cell(gap_row, col, "")
-            gap_cell.fill = PatternFill(fill_type=None)
+            gap_cell.fill = PatternFill(fill_type=None)   
 
+    
         # Box starts 1 row below the gap
         box_top = r_ctrl + 2
         row = box_top
-
-        # Total unmapped
+    
+        # ---- Total unmapped ----
         ws.cell(row, 3, "Total unmapped").font = Font(bold=True)
         ws.cell(row, 3).fill = header_fill
-
+    
         unm_cell = ws.cell(row, 4, unmapped_total)
         unm_cell.number_format = "#,##0.00"
         unm_cell.fill = header_fill
-
-        # Diff row
+    
+        # ---- Diff row ----
         row += 1
         diff_label = ws.cell(row, 3, "Diff.")
-        diff_label.fill = header_fill
-        diff_label.font = Font(bold=True)
-
+        diff_label.fill = entry_fill
+    
         diff_cell = ws.cell(row, 4, f"=D{r_ctrl}+D{box_top}")
         diff_cell.number_format = "#,##0.00"
+        diff_cell.fill = entry_fill
+    
+        
+        # Format "Diff." line as header-style row
+        diff_label.fill = header_fill
         diff_cell.fill = header_fill
+        
+        # Bold label only
+        diff_label.font = Font(bold=True)
         diff_cell.font = Font(bold=False)
-
+    
+        # Apply borders
         apply_borders(ws, box_top, row, 3, 4)
 
-    # Autofit (for this sheet only here; global autofit also done later)
-    for col in ws.columns:
-        max_len = max((len(str(c.value)) if c.value else 0 for c in col), default=0)
-        ws.column_dimensions[openpyxl.utils.get_column_letter(col[0].column)].width = max_len + 2
+
+####### - 
 
 
 # === INTERNAL ZEROING ===
 def remove_internal_zeroes(df, tol=TOLERANCE):
     """
-    EXACTLY AS BEFORE – DO NOT CHANGE LOGIC.
     Remove internal cancelling entries when:
       - ICP CODE is the same (or empty/NaN in both lines), and
       - GAAP Code is the same (or empty/NaN in both lines), and
       - Amounts sum to ~0 within tolerance.
 
-    Then cumulative zero-block trimming per (ICP, GAAP) bucket.
+    Document No. is intentionally ignored.
+
+    Then, within each (ICP, GAAP) bucket, perform cumulative zero-block
+    trimming: drop entries up to the last point where that bucket's
+    cumulative sum returns to (approx.) zero.
     """
     if df.empty:
         return df
 
+    # Sort chronologically
     df = df.sort_values("Posting Date", ascending=True).reset_index(drop=True)
 
     def _norm_key(x):
+        """Normalize ICP/GAAP for grouping & equality: treat NaN/empty as ''."""
         if pd.isna(x):
             return ""
         return str(x).strip()
 
+    # Normalized keys used for both pairwise and cumulative logic
     df["_icp_norm"] = df["ICP CODE"].apply(_norm_key) if "ICP CODE" in df.columns else ""
     df["_gaap_norm"] = df["GAAP Code"].apply(_norm_key) if "GAAP Code" in df.columns else ""
 
-    # 1) Pairwise zero removal
+    # ---------- 1) Pairwise zero removal within same ICP/GAAP ----------
     keep = [True] * len(df)
     for i in range(len(df)):
         if not keep[i]:
@@ -565,12 +606,13 @@ def remove_internal_zeroes(df, tol=TOLERANCE):
             same_gaap = (df.loc[i, "_gaap_norm"] == df.loc[j, "_gaap_norm"])
 
             if same_icp and same_gaap and abs(df.loc[i, "Amount (LCY)"] + df.loc[j, "Amount (LCY)"]) < tol:
+                # Exact opposite pair within same ICP/GAAP bucket -> drop both
                 keep[i] = keep[j] = False
                 break
 
     df = df[keep].copy()
 
-    # 2) Cumulative zero trimming per (ICP, GAAP) bucket
+    # ---------- 2) Cumulative zero trimming per (ICP, GAAP) bucket ----------
     def _trim_group(g):
         if g.empty:
             return g
@@ -585,25 +627,18 @@ def remove_internal_zeroes(df, tol=TOLERANCE):
 
     df = df.groupby(["_icp_norm", "_gaap_norm"], group_keys=False).apply(_trim_group)
 
+    # Clean up helper columns and reindex
     df = df.drop(columns=["_icp_norm", "_gaap_norm"], errors="ignore").reset_index(drop=True)
+
     return df
 
 
-# === WORKBOOK BUILDING (optimised) ===
-def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
-                   code_to_meta, ICP, tolerance=TOLERANCE):
+
+# === WORKBOOK BUILDING #
+def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code, code_to_meta, ICP, tolerance=TOLERANCE):
     """
     Returns: openpyxl.Workbook object, sheet_status dict, account_anchor dict, mismatch_accounts list
     """
-
-    # === Pre-compute entries grouped by account (MAIN PERFORMANCE GAIN) ===
-    # Instead of filtering entries_df for each account in nested loops,
-    # we build a dict once and reuse.
-    entries_by_account = {
-        acc: df.copy()
-        for acc, df in entries_df.groupby("G/L Account No.")
-    }
-
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
@@ -615,6 +650,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
         for c_idx, val in enumerate(row, 1):
             ws_tb.cell(r_idx, c_idx, val)
 
+    # Autofit for trial balance
     for col in ws_tb.columns:
         max_len = max((len(str(c.value)) if c.value else 0 for c in col), default=0)
         ws_tb.column_dimensions[openpyxl.utils.get_column_letter(col[0].column)].width = max_len + 2
@@ -631,6 +667,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
     account_anchor = {}
     mismatch_accounts = []
 
+    # iterate mapping order
     for sheet_name in sheet_order:
         subset = trial_balance_df[trial_balance_df["sheet_group"] == sheet_name]
         if subset.empty:
@@ -646,9 +683,8 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
             acc_name = tb.get("Name", "")
             tb_bal = tb.get("Balance at Date", 0.0)
 
-            # PERF: use pre-grouped entries
-            acc_df = entries_by_account.get(acc_no)
-            if acc_df is None or acc_df.empty:
+            acc_df = entries_df[entries_df["G/L Account No."] == acc_no].copy()
+            if acc_df.empty:
                 continue
 
             account_count += 1
@@ -666,7 +702,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
             if acc_df.empty:
                 continue
 
-            # remove internal zeroes (logic unchanged)
+            # remove internal zeroes (only when Document No., ICP and GAAP match)
             acc_df = remove_internal_zeroes(acc_df)
             if acc_df.empty:
                 continue
@@ -675,16 +711,19 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
             if acc_no in ICP_TOTAL_ACCOUNTS:
                 tmp = acc_df.copy()
 
+                # Create a grouping key that also captures lines WITHOUT ICP
                 if "ICP CODE" in tmp.columns:
                     tmp["_icp_group"] = tmp["ICP CODE"].astype(str)
                     tmp["_icp_group"] = tmp["_icp_group"].replace("nan", "").fillna("")
                     tmp.loc[tmp["_icp_group"].str.strip() == "", "_icp_group"] = "No ICP"
                 else:
+                    # If column doesn't exist at all, everything is "No ICP"
                     tmp["_icp_group"] = "No ICP"
 
                 grouped = tmp.groupby("_icp_group", as_index=False)["Amount (LCY)"].sum()
                 grouped.rename(columns={"_icp_group": "ICP CODE"}, inplace=True)
 
+                # For display: Description = ICP code (or "No ICP"), GAAP/Doc blank
                 grouped["Description"] = grouped["ICP CODE"]
                 grouped["Document No."] = ""
                 grouped["GAAP Code"] = ""
@@ -692,6 +731,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
                 acc_view = grouped[["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]].copy()
                 net_sum = round(acc_view["Amount (LCY)"].sum(), 2)
 
+                # Header row
                 header_cell = ws.cell(row=row_cursor, column=1, value=f"{acc_no} - {acc_name}")
                 account_anchor[acc_no] = (ws.title, row_cursor)
                 hyperlink_to_frontpage(header_cell)
@@ -710,18 +750,21 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
                 row_cursor += 1
                 block_start = row_cursor
 
+                # Column headers
                 cols = ["Description", "Document No.", "ICP CODE", "GAAP Code", "Amount (LCY)"]
                 for c_idx, col in enumerate(cols, 1):
                     ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
                     ws.cell(row=row_cursor, column=c_idx).fill = header_fill
                 row_cursor += 1
 
+                # Rows
                 for _, r in acc_view.iterrows():
                     for c_idx, col in enumerate(cols, 1):
                         cell = ws.cell(row=row_cursor, column=c_idx, value=r.get(col, ""))
                         cell.fill = entry_fill
                     row_cursor += 1
 
+                # Total row
                 ws.cell(row=row_cursor, column=4, value="Account Total").font = Font(bold=True)
                 vcell = ws.cell(row=row_cursor, column=5, value=net_sum)
                 vcell.font = Font(bold=True)
@@ -732,7 +775,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
                 row_cursor += 3
                 continue
 
-            # Special: 311000 / 721000
+            # Special: accounts 311000 and 721000 → show ONLY one total line (no ICP grouping)
             if acc_no in ["311000", "721000"]:
                 net_sum = round(acc_df["Amount (LCY)"].sum(), 2)
 
@@ -753,12 +796,14 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
                 row_cursor += 1
                 block_start = row_cursor
 
+                # First row: labels (Note header + Account Total label)
                 ws.cell(row=row_cursor, column=1, value="Note").font = Font(bold=True)
                 ws.cell(row=row_cursor, column=6, value="Account Total").font = Font(bold=True)
                 for c in range(1, 7):
                     ws.cell(row=row_cursor, column=c).fill = total_fill
                 row_cursor += 1
 
+                # Second row: content - (See documentation) + total
                 ws.cell(row=row_cursor, column=1, value="(See documentation)")
                 vcell = ws.cell(row=row_cursor, column=6, value=net_sum)
                 vcell.number_format = "#,##0.00"
@@ -769,7 +814,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
                 row_cursor += 3
                 continue
 
-            # Special: bank/cash 390000–399999
+            # Special: bank/cash accounts 390000–399999 -> totals only with note (See documentation)
             if acc_no.isdigit() and 390000 <= int(acc_no) <= 399999:
                 net_sum = round(acc_df["Amount (LCY)"].sum(), 2)
 
@@ -790,12 +835,14 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
                 row_cursor += 1
                 block_start = row_cursor
 
+                # First row: labels (Note header + Account Total label)
                 ws.cell(row=row_cursor, column=1, value="Note").font = Font(bold=True)
                 ws.cell(row=row_cursor, column=6, value="Account Total").font = Font(bold=True)
                 for c in range(1, 7):
                     ws.cell(row=row_cursor, column=c).fill = total_fill
                 row_cursor += 1
 
+                # Second row: content - (See documentation) + total
                 ws.cell(row=row_cursor, column=1, value="(See documentation)")
                 vcell = ws.cell(row=row_cursor, column=6, value=net_sum)
                 vcell.number_format = "#,##0.00"
@@ -806,7 +853,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
                 row_cursor += 3
                 continue
 
-            # Normal accounts
+            # Normal accounts: show full list newest -> oldest
             acc_df = acc_df.sort_values("Posting Date", ascending=False)
             net_sum = round(acc_df["Amount (LCY)"].sum(), 2)
 
@@ -827,11 +874,13 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
             row_cursor += 1
             block_start = row_cursor
 
+            # Column headers
             for c_idx, col in enumerate(cols_present, 1):
                 ws.cell(row=row_cursor, column=c_idx, value=col).font = Font(bold=True)
                 ws.cell(row=row_cursor, column=c_idx).fill = header_fill
             row_cursor += 1
 
+            # Rows: entries
             for _, e in acc_df.iterrows():
                 for c_idx, col in enumerate(cols_present, 1):
                     val = e.get(col, "")
@@ -839,6 +888,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
                     cell.fill = entry_fill
                 row_cursor += 1
 
+            # Totals row
             ws.cell(row=row_cursor, column=len(cols_present) - 1, value="Account Total").font = Font(bold=True)
             total_cell = ws.cell(row=row_cursor, column=len(cols_present), value=net_sum)
             total_cell.font = Font(bold=True)
@@ -852,7 +902,7 @@ def build_workbook(trial_balance_df, entries_df, map_dir, acct_to_code,
 
     return wb, sheet_status, account_anchor, mismatch_accounts
 
-
+# === FINALIZE: front page, formatting, save to bytes ===
 def finalize_workbook_to_bytes(
     wb,
     sheet_status,
@@ -879,7 +929,7 @@ def finalize_workbook_to_bytes(
     ws_front["A1"] = "EE Reconciliation Overview"
     ws_front["A1"].font = Font(size=16, bold=True)
 
-    # === PLC CARD ===
+    # === PLC CARD (ICP, Company, Accountant, Controller, Quarter) ===
     plc_norm = None
     plc_path = Path(plc_path) if plc_path else DEFAULT_PLC
     try:
@@ -901,12 +951,14 @@ def finalize_workbook_to_bytes(
         icp_key = str(icp).strip().upper()
         row = plc_norm.loc[plc_norm["ICP code_norm"] == icp_key] if plc_norm is not None else pd.DataFrame()
 
+        # Labels
         ws_front.cell(row_ptr, 1, "ICP code").font = Font(bold=True)
         ws_front.cell(row_ptr + 1, 1, "Company name").font = Font(bold=True)
         ws_front.cell(row_ptr + 2, 1, "Accountant").font = Font(bold=True)
         ws_front.cell(row_ptr + 3, 1, "Controller").font = Font(bold=True)
         ws_front.cell(row_ptr + 4, 1, "Current Quarter").font = Font(bold=True)
 
+        # Values
         ws_front.cell(row_ptr, 2, icp_key)
         if not row.empty:
             ws_front.cell(row_ptr + 1, 2, row.iloc[0]["Company name"])
@@ -920,47 +972,54 @@ def finalize_workbook_to_bytes(
         if quarter:
             ws_front.cell(row_ptr + 4, 2, str(quarter))
 
-        for r in range(row_ptr, row_ptr + 5):
-            for c in range(1, 3):
+        # Colour PLC block
+        for r in range(row_ptr, row_ptr + 5):  # rows row_ptr..row_ptr+4
+            for c in range(1, 3):              # cols A:B
                 ws_front.cell(r, c).fill = plc_fill
 
+        # Border around PLC + Quarter
         apply_borders(ws_front, top=row_ptr, bottom=row_ptr + 4, left=1, right=2)
-        row_ptr += 7
 
-    # === AUTOMATIC COMMENTS BOX ===
+        row_ptr += 7  # blank rows after PLC card
+
+    # === AUTOMATICALLY GENERATED COMMENTS BOX ===
+    # Quick checks
     comments = []
 
     mask_200_399 = (
-        trial_balance_df["No."].astype(str).str.isdigit()
-        & trial_balance_df["No."].astype(int).between(200000, 399999)
+        trial_balance_df["No."].astype(str).str.isdigit() &
+        trial_balance_df["No."].astype(int).between(200000, 399999)
     )
     negatives = trial_balance_df.loc[
         mask_200_399 & (trial_balance_df["Balance at Date"] < 0),
-        ["No.", "Name", "Balance at Date"],
+        ["No.", "Name", "Balance at Date"]
     ]
 
     mask_400_plus = (
-        trial_balance_df["No."].astype(str).str.isdigit()
-        & (trial_balance_df["No."].astype(int) >= 400000)
+        trial_balance_df["No."].astype(str).str.isdigit() &
+        (trial_balance_df["No."].astype(int) >= 400000)
     )
     positives = trial_balance_df.loc[
         mask_400_plus & (trial_balance_df["Balance at Date"] > 0),
-        ["No.", "Name", "Balance at Date"],
+        ["No.", "Name", "Balance at Date"]
     ]
 
-    # Unmapped accounts
+    # Unmapped accounts = rows with no mapping code
     if "code" in trial_balance_df.columns:
         mask_unmapped = trial_balance_df["code"].isna()
         unmapped_accounts = trial_balance_df.loc[
             mask_unmapped, ["No.", "Name", "Balance at Date"]
         ]
     elif "sheet_group" in trial_balance_df.columns:
+        # Fallback: use sheet_group if code is not present
         mask_unmapped = trial_balance_df["sheet_group"].astype(str).str.strip().eq("Unmapped")
         unmapped_accounts = trial_balance_df.loc[
             mask_unmapped, ["No.", "Name", "Balance at Date"]
         ]
     else:
         unmapped_accounts = pd.DataFrame(columns=["No.", "Name", "Balance at Date"])
+
+
 
     if not negatives.empty:
         comments.append(f"{len(negatives)} account(s) in the 200000–399999 range have negative balances.")
@@ -983,30 +1042,36 @@ def finalize_workbook_to_bytes(
     comments_top = row_ptr
     header_cell = ws_front.cell(row_ptr, 1, "Comments:")
     header_cell.font = Font(bold=True, underline="single")
+    #Only colour column A
     ws_front.cell(row_ptr, 1).fill = header_fill
     row_ptr += 1
-
+    
     start_row = row_ptr
     for i, comment in enumerate(comments, start=start_row):
         ws_front.cell(i, 1).fill = entry_fill
         ws_front.cell(i, 1, f"• {comment}")
     comments_bottom = start_row + len(comments) - 1
-
+    
+    # Border only around column A
     apply_borders(ws_front, top=comments_top, bottom=comments_bottom, left=1, right=1)
-    row_ptr = comments_bottom + 2
 
-    # Logo
+    row_ptr = comments_bottom + 2
+    
+    # --- ✅ INSERT EE LOGO HERE ✅ ---
     logo_path = STATIC_DIR / "logo.png"
     if logo_path.exists():
         try:
             logo = Image(str(logo_path))
-            logo.width = 130
+            logo.width = 130   # adjust if needed
             logo.height = 130
-            ws_front.add_image(logo, "D2")
+            ws_front.add_image(logo, "D2")  # position on the sheet
         except Exception:
-            pass
+            pass  # Don't break the app if the logo fails
+    # --- ✅ END LOGO BLOCK ✅ ---
 
-    # Helper for hyperlinks
+
+    
+    # === Helper for hyperlinks ===
     def set_hyperlink(cell, acc_no):
         acc = str(acc_no)
         if acc in account_anchor:
@@ -1014,8 +1079,9 @@ def finalize_workbook_to_bytes(
             sheet_ref = f"'{sheet_name}'" if not sheet_name.isalnum() else sheet_name
             cell.hyperlink = f"#{sheet_ref}!A{anchor_row}"
             cell.style = "Hyperlink"
-
-    # === 1) ACCOUNTS OUT OF BALANCE ===
+    
+   
+    # === 1) ACCOUNTS OUT OF BALANCE (RED BLOCK) ===
     if mismatch_accounts:
         block_top = row_ptr
         title_cell = ws_front.cell(row_ptr, 1, "Accounts out of balance (TB vs entries):")
@@ -1052,45 +1118,56 @@ def finalize_workbook_to_bytes(
 
         block_bottom = row_ptr - 1
         apply_borders(ws_front, top=block_top, bottom=block_bottom, left=1, right=5)
-        row_ptr += 1
+        row_ptr += 1  # spacing after block
 
+  
     # === 1b) UNMAPPED ACCOUNTS (RED BLOCK) ===
     if not unmapped_accounts.empty:
         block_top = row_ptr
-
+    
+        # Header line
         title_cell = ws_front.cell(row_ptr, 1, "Unmapped accounts (no mapping code):")
         title_cell.font = Font(bold=True)
         for c in range(1, 4):
             ws_front.cell(row_ptr, c).fill = red_fill
         row_ptr += 1
-
+    
+        # Column headers
         headers = ["Account", "Name", "TB balance"]
         for col_idx, h in enumerate(headers, start=1):
             cell = ws_front.cell(row_ptr, col_idx, h)
             cell.font = Font(bold=True)
             cell.fill = red_fill
         row_ptr += 1
-
+    
+        # Data rows
         for _, r in unmapped_accounts.iterrows():
             acc = str(r["No."])
-
+    
+            # Account number + hyperlink to the Unmapped tab
             acc_cell = ws_front.cell(row_ptr, 1, acc)
             acc_cell.hyperlink = "#'Unmapped'!A1"
             acc_cell.font = Font(color="0000FF", underline="single")
             acc_cell.style = "Hyperlink"
-
+    
+            # Name + Balance
             ws_front.cell(row_ptr, 2, r.get("Name", ""))
             val_cell = ws_front.cell(row_ptr, 3, r["Balance at Date"])
             val_cell.number_format = "#,##0.00"
-
+    
+            # Row formatting
             for c in range(1, 4):
                 ws_front.cell(row_ptr, c).fill = red_fill
-
+    
             row_ptr += 1
-
+    
+        # Apply borders
         block_bottom = row_ptr - 1
         apply_borders(ws_front, top=block_top, bottom=block_bottom, left=1, right=3)
-        row_ptr += 1
+    
+        row_ptr += 1  # gap after block
+
+
 
     # === 2) NEGATIVE BALANCES ===
     if not negatives.empty:
@@ -1249,6 +1326,7 @@ def finalize_workbook_to_bytes(
     return bio
 
 
+
 # === PUBLIC: generate_reconciliation_file ===
 def generate_reconciliation_file(
     trial_balance_file,
@@ -1266,15 +1344,17 @@ def generate_reconciliation_file(
       - pathlib.Path or str paths
 
     Returns:
-      - BytesIO containing the generated workbook .xlsx
+      - BytesIO (seeked to 0) containing the generated workbook .xlsx
     """
+    # Load mapping from static (app-internal) unless explicit path provided
     mapping_path = Path(mapping_path) if mapping_path else DEFAULT_MAPPING
     plc_path = Path(plc_path) if plc_path else DEFAULT_PLC
 
+    # Read user inputs (pandas handles file-like objects)
     trial_balance = pd.read_excel(trial_balance_file)
     entries = pd.read_excel(entries_file)
 
-    # Normalize column names
+    # --- 🔧 Normalize column names early ---
     entries.columns = [str(c).strip() for c in entries.columns]
 
     # Standardize Amount column: "Amount" or "Amount (LCY)" → "Amount (LCY)"
@@ -1301,7 +1381,7 @@ def generate_reconciliation_file(
         inplace=True,
     )
 
-    # Required columns AFTER normalization
+    # --- ✅ Required columns AFTER normalization ---
     missing = []
     required_cols = ["G/L Account No.", "Posting Date", "Amount (LCY)", "ICP CODE", "GAAP Code"]
     for col in required_cols:
