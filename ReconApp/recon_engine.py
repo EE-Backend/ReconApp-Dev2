@@ -1223,7 +1223,7 @@ def finalize_workbook_to_bytes(
         ([(234110, 234120)], "Add documentation for Long-term receivables"),
         ([(311000, 311020)], "Add documentation for Trade receivables"),
         ([(321000, 321100)], "Add documentation for Amounts owed by affiliate companies"),
-        ([(391010, 391070), (393005, 393998)], "Add documentation for Bank account"),
+        ([(391010, 391070), (393001, 393998)], "Add documentation for Bank account"),
         ([(634010, 634011)], "Add documentation for Other I/C Loans"),
         ([(721000, 721001)], "Add documentation for Trade payables"),
         ([(731000, 731100)], "Add documentation for Amounts owed to affiliated companies"),
